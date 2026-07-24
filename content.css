@@ -90,6 +90,12 @@
   font-weight: 600;
 }
 
+.ytds-step {
+  padding: 6px 10px;
+  font-weight: 600;
+  min-width: 34px;
+}
+
 .ytds-select {
   margin-left: auto;
   background: var(--sel-bg);
@@ -104,8 +110,8 @@
 .ytds-roll {
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 10px;
-  max-height: 40vh;
   overflow: hidden;
 }
 .ytds-block {
@@ -124,13 +130,13 @@
 }
 .ytds-en {
   color: var(--en);
-  font-size: 22px;
+  font-size: calc(22px * var(--font-scale, 1));
   font-weight: 500;
   margin-bottom: 4px;
 }
 .ytds-ua {
   color: var(--tr);
-  font-size: 19px;
+  font-size: calc(19px * var(--font-scale, 1));
 }
 
 .ytds-status {
@@ -182,8 +188,8 @@ html.ytds-fs .ytds-roll {
   justify-content: flex-end;
   gap: 6px;
 }
-html.ytds-fs .ytds-en { font-size: 26px; }
-html.ytds-fs .ytds-ua { font-size: 22px; }
+html.ytds-fs .ytds-en { font-size: calc(26px * var(--font-scale, 1)); }
+html.ytds-fs .ytds-ua { font-size: calc(22px * var(--font-scale, 1)); }
 /* keep the toolbar and status compact in fullscreen */
 html.ytds-fs .ytds-status { display: none; }
 

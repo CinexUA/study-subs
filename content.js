@@ -4,7 +4,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia' };
+  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, rollH: 96 };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -336,6 +336,18 @@
       btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
     });
 
+    const mkBtn = (label, title, fn) => {
+      const b = document.createElement('button');
+      b.className = 'ytds-btn ytds-step';
+      b.textContent = label; b.title = title;
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1));
+    const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1));
+    const heightMinus = mkBtn('H−', 'Нижче вікно', () => changeHeight(-30));
+    const heightPlus = mkBtn('H+', 'Вище вікно', () => changeHeight(30));
+
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
     themeSel.title = 'Тема панелі';
@@ -358,7 +370,7 @@
     }
     langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
-    bar.append(btnEn, btnUa, btnHide, btnLog, themeSel, langSel);
+    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, heightMinus, heightPlus, themeSel, langSel);
 
     elRoll = document.createElement('div');
     elRoll.className = 'ytds-roll';
@@ -396,6 +408,7 @@
     });
     if (langSel) langSel.value = state.targetLang;
     updateLabels();
+    applyLayout();
     refresh();
   }
 
@@ -413,6 +426,23 @@
 
   function applyTheme() {
     if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
+  }
+
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+  function applyLayout() {
+    if (panel) panel.style.setProperty('--font-scale', state.fontScale || 1);
+    if (elRoll) elRoll.style.minHeight = state.rollH ? state.rollH + 'px' : '';
+  }
+
+  function changeFont(delta) {
+    state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.2);
+    saveState(); applyLayout();
+  }
+
+  function changeHeight(delta) {
+    state.rollH = clamp((state.rollH || 96) + delta, 48, 480);
+    saveState(); applyLayout();
   }
 
   // ---------- fullscreen ----------
