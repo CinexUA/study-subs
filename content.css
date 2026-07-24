@@ -167,6 +167,28 @@ html.ytds-hide-native .ytp-caption-window-container {
   display: none !important;
 }
 
+/* ---------- Reader mode: full-viewport overlay, subtitles centered ---------- */
+html.ytds-reader .ytds-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  padding: 16px 6vw;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+html.ytds-reader .ytds-roll {
+  flex: 1 1 auto;
+  justify-content: center;
+  overflow: hidden;
+}
+html.ytds-reader .ytds-status { display: none; }
+html.ytds-reader .ytds-en { font-size: calc(34px * var(--font-scale, 1)); }
+html.ytds-reader .ytds-ua { font-size: calc(28px * var(--font-scale, 1)); }
+
 /* ---------- Fullscreen: dock panel at the bottom, push the video up ---------- */
 html.ytds-fs .ytds-panel {
   position: absolute;

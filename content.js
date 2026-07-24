@@ -4,7 +4,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1 };
+  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -33,6 +33,7 @@
     applyNativeHide();
     ensurePanel();
     syncUi();
+    applyReader();
   });
   const saveState = () => chrome.storage.local.set({ ytds: state });
 
@@ -364,6 +365,8 @@
     };
     const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1));
     const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1));
+    const btnReader = mkToggle('⤢ Читання', 'reader', applyReader);
+    btnReader.title = 'Режим читання на весь екран (Esc — вийти)';
 
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
@@ -387,7 +390,7 @@
     }
     langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
-    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, themeSel, langSel);
+    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, btnReader, themeSel, langSel);
 
     elRoll = document.createElement('div');
     elRoll.className = 'ytds-roll';
@@ -444,6 +447,28 @@
   function applyTheme() {
     if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
   }
+
+  // Reader mode: the panel becomes a full-viewport overlay (own overlay, not the
+  // browser fullscreen), subtitles centered and large. The video keeps playing
+  // its audio behind it. Exit with the button or Esc.
+  function applyReader() {
+    const on = !!state.reader;
+    document.documentElement.classList.toggle('ytds-reader', on);
+    if (!panel) return;
+    if (on) {
+      document.body.appendChild(panel);
+    } else {
+      const anchor = document.querySelector('#below') || document.querySelector('#secondary');
+      if (anchor) anchor.prepend(panel);
+    }
+    refresh();
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && state.reader) {
+      state.reader = false; saveState(); applyReader(); syncUi();
+    }
+  });
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
