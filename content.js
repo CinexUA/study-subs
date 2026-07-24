@@ -301,6 +301,14 @@
     elRoll.textContent = '';
     if (state.showEn) appendLang(enLines, en, 'ytds-en');
     if (state.showUa) appendLang(uaLines, ua, 'ytds-ua');
+    measureDock();
+  }
+
+  // In fullscreen the video is shrunk by the panel's real height, so the dock
+  // hugs its content (no empty space when a row is toggled off).
+  function measureDock() {
+    if (!panel || !document.documentElement.classList.contains('ytds-fs')) return;
+    document.documentElement.style.setProperty('--dock-h', panel.offsetHeight + 'px');
   }
 
   function appendLang(lines, sel, cls) {
@@ -447,7 +455,7 @@
 
   function changeFont(delta) {
     state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.2);
-    saveState(); applyLayout();
+    saveState(); applyLayout(); refresh(); // re-render to remeasure the dock
   }
 
   // ---------- fullscreen ----------
@@ -462,7 +470,8 @@
       const anchor = document.querySelector('#below') || document.querySelector('#secondary');
       if (anchor && panel) anchor.prepend(panel);
     }
-    setTimeout(() => window.dispatchEvent(new Event('resize')), 60);
+    refresh();
+    setTimeout(() => { window.dispatchEvent(new Event('resize')); measureDock(); }, 60);
   }
   document.addEventListener('fullscreenchange', onFullscreen);
 
