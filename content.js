@@ -198,8 +198,15 @@
       if (start == null) { start = u.t; buf = ''; }
       buf += u.text;
       if (/[.!?…]["'”’)\]]*\s*$/.test(buf)) {
-        const end = (i + 1 < units.length) ? units[i + 1].t
-          : (video && video.duration ? video.duration : u.t + 3);
+        let end;
+        if (i + 1 < units.length) {
+          // Stop in the pause BEFORE the next word, so its onset is neither
+          // heard nor revealed — but keep at least a little of the last word
+          // if the gap happens to be tiny.
+          end = Math.max(u.t + 0.12, units[i + 1].t - 0.2);
+        } else {
+          end = (video && video.duration ? video.duration : u.t + 3);
+        }
         out.push({ start, end });
         start = null;
       }
