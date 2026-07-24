@@ -1,6 +1,6 @@
 // Runs in the ISOLATED world. Builds the subtitle panel under the video,
-// gets captions (direct, or via the player's intercepted request), groups them
-// into whole-sentence blocks and shows them as a rolling transcript.
+// gets captions (direct, or via the player's intercepted request), and reveals
+// them word by word (like YouTube), one caption-sized line at a time.
 (() => {
   'use strict';
 
@@ -11,12 +11,14 @@
     ['it', 'Italiano'], ['ru', 'Русский']
   ];
   const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
+  const LEAD = 0.12; // reveal a word this many seconds around its timestamp
 
   let state = { ...DEFAULTS };
-  let blocks = [];           // [{ start, end, en, ua }]
-  let curBlock = -1;
-  let enRawLen = 0, uaRawLen = 0;
+  let enLines = [];          // [{ start, end, units:[{t,text}], full }]
+  let uaLines = [];
+  let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
+  let lastSig = null;
   let currentVideoId = null;
   let awaitingCapture = false;
   let captureTimer = null;
@@ -46,7 +48,7 @@
   }
 
   const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
-  const clearDisplay = () => { if (elRoll) elRoll.textContent = ''; };
+  const clearDisplay = () => { if (elRoll) elRoll.textContent = ''; lastSig = null; };
 
   // ---------- MAIN-world bridge ----------
   function requestTracks() {
@@ -68,7 +70,7 @@
     });
   }
 
-  // ---------- caption fetching / parsing ----------
+  // ---------- fetching / parsing (word-level units) ----------
   function reuseBase(url) {
     try {
       const u = new URL(url, location.origin);
@@ -78,117 +80,97 @@
     } catch (_) { return url; }
   }
 
-  // Returns raw time-chunks [{ start, end, text }] (no grouping).
-  async function fetchSegs(baseUrl, tlang) {
+  // Returns [{ t, text }] — one entry per word (json3) or per chunk (xml).
+  async function fetchUnits(baseUrl, tlang) {
     const tl = tlang ? '&tlang=' + encodeURIComponent(tlang) : '';
     for (const fmt of ['&fmt=json3', '']) {
       const res = await fetch(baseUrl + fmt + tl);
       if (!res.ok) continue;
       const body = (await res.text()).trim();
       if (!body) continue;
-      const segs = parseAny(body);
-      if (segs.length) return segs;
+      const units = parseUnits(body);
+      if (units.length) return units;
     }
     return [];
   }
 
-  function parseAny(body) {
+  function parseUnits(body) {
     body = (body || '').trim();
     if (!body) return [];
-    if (body[0] === '{') { try { return parseJson3(JSON.parse(body)); } catch (_) { return []; } }
-    return parseXml(body);
+    if (body[0] === '{') { try { return parseJson3Units(JSON.parse(body)); } catch (_) { return []; } }
+    return parseXmlUnits(body);
   }
 
-  function parseJson3(data) {
-    const out = [];
+  function parseJson3Units(data) {
+    const units = [];
     for (const ev of (data.events || [])) {
       if (!ev.segs) continue;
-      const text = ev.segs.map((s) => s.utf8 || '').join('').replace(/\s+/g, ' ').trim();
-      if (!text) continue;
-      const start = (ev.tStartMs || 0) / 1000;
-      out.push({ start, end: start + (ev.dDurationMs || 0) / 1000, text });
-    }
-    return out;
-  }
-
-  function parseXml(xml) {
-    const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    const push = (nodes, tAttr, dAttr, scale) => nodes.map((n) => {
-      const start = parseFloat(n.getAttribute(tAttr) || '0') / scale;
-      const dur = parseFloat(n.getAttribute(dAttr) || '0') / scale;
-      const text = (n.textContent || '').replace(/\s+/g, ' ').trim();
-      return text ? { start, end: start + dur, text } : null;
-    }).filter(Boolean);
-
-    let nodes = [...doc.querySelectorAll('text')];
-    if (nodes.length) return push(nodes, 'start', 'dur', 1);
-    nodes = [...doc.querySelectorAll('p')];
-    return push(nodes, 't', 'd', 1000);
-  }
-
-  // Re-group short chunks into whole-sentence blocks; never cut mid-sentence.
-  function groupSegs(segs, minChars = 50, maxChars = 200, maxDur = 8) {
-    const chars = [];
-    for (const s of segs) {
-      const t = (s.text || '').trim();
-      if (!t) continue;
-      if (chars.length && chars[chars.length - 1].ch !== ' ') chars.push({ ch: ' ', start: s.start, end: s.end });
-      for (const ch of t) chars.push({ ch, start: s.start, end: s.end });
-    }
-    const out = [];
-    let buf = '', start = null, end = null;
-    const flush = () => { const text = buf.trim(); if (text) out.push({ start, end, text }); buf = ''; start = null; };
-    for (let i = 0; i < chars.length; i++) {
-      const c = chars[i];
-      if (start === null) { if (c.ch === ' ') continue; start = c.start; }
-      buf += c.ch; end = c.end;
-      const next = chars[i + 1];
-      const nextIsBreak = !next || next.ch === ' ';
-      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf) && nextIsBreak;
-      if (endsSentence && buf.trim().length >= minChars) flush();
-      else if (buf.length >= maxChars || (end - start) >= maxDur) flush();
-    }
-    flush();
-    return out;
-  }
-
-  // Pair each EN sentence block with the overlapping UA chunks (same timeline).
-  function buildBlocks(enRaw, uaRaw, sameLang) {
-    const enBlocks = groupSegs(enRaw);
-    return enBlocks.map((b) => ({
-      start: b.start,
-      end: b.end,
-      en: b.text,
-      ua: sameLang ? b.text : joinOverlap(uaRaw, b.start, b.end)
-    }));
-  }
-
-  function joinOverlap(raw, start, end) {
-    const parts = [];
-    for (const s of raw) {
-      const mid = (s.start + s.end) / 2;
-      if (mid >= start - 0.05 && mid < end + 0.05) {
-        const t = (s.text || '').trim();
-        if (t) parts.push(t);
+      const base = ev.tStartMs || 0;
+      for (const s of ev.segs) {
+        const txt = s.utf8;
+        if (txt == null || !txt.replace(/\s/g, '')) continue; // skip empty / newline
+        units.push({ t: (base + (s.tOffsetMs || 0)) / 1000, text: txt });
       }
     }
-    return parts.join(' ').replace(/\s+/g, ' ').trim();
+    return units;
   }
 
-  function findBlock(t) {
-    let lo = 0, hi = blocks.length - 1, ans = -1;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      if (blocks[mid].start <= t) { ans = mid; lo = mid + 1; }
-      else hi = mid - 1;
+  function parseXmlUnits(xml) {
+    const doc = new DOMParser().parseFromString(xml, 'text/xml');
+    const make = (nodes, tAttr, scale) => nodes.map((n, i) => {
+      const t = parseFloat(n.getAttribute(tAttr) || '0') / scale;
+      const text = (n.textContent || '').replace(/\s+/g, ' ').trim();
+      return text ? { t, text: (i > 0 ? ' ' : '') + text } : null;
+    }).filter(Boolean);
+    let nodes = [...doc.querySelectorAll('text')];
+    if (nodes.length) return make(nodes, 'start', 1);
+    nodes = [...doc.querySelectorAll('p')];
+    return make(nodes, 't', 1000);
+  }
+
+  // Group words into caption-sized lines; break on sentence end or width cap,
+  // but keep the per-word timing so we can reveal them progressively.
+  function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
+    const lines = [];
+    let cur = null, buf = '';
+    const flush = () => {
+      if (cur && cur.units.length) {
+        cur.full = cur.units.map((u) => u.text).join('').replace(/\s+/g, ' ').trim();
+        cur.end = cur.units[cur.units.length - 1].t;
+        lines.push(cur);
+      }
+      cur = null; buf = '';
+    };
+    for (const u of units) {
+      if (!cur) cur = { start: u.t, units: [] };
+      cur.units.push(u);
+      buf += u.text;
+      const trimmed = buf.trim();
+      const endsSentence = /[.!?…]["'”’)\]]*$/.test(trimmed);
+      if ((endsSentence && trimmed.length >= minChars) || trimmed.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
     }
-    return ans;
+    flush();
+    return lines;
+  }
+
+  function pickLine(lines, t) {
+    if (!lines.length) return { idx: -1, n: 0 };
+    let lo = 0, hi = lines.length - 1, idx = -1;
+    while (lo <= hi) {
+      const m = (lo + hi) >> 1;
+      if (lines[m].start <= t) { idx = m; lo = m + 1; }
+      else hi = m - 1;
+    }
+    if (idx < 0) return { idx: -1, n: 0 };
+    let n = 0;
+    for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
+    return { idx, n: Math.max(1, n) };
   }
 
   function updateStatus() {
-    const uaNote = (state.targetLang !== srcLang && !uaRawLen) ? ' · переклад недоступний' : '';
+    const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · переклад недоступний' : '';
     const srcU = (srcLang || 'en').toUpperCase();
-    setStatus(`джерело: ${srcLang || '?'} · ${srcU} ${enRawLen} · ${state.targetLang.toUpperCase()} ${uaRawLen} · блоків ${blocks.length}${uaNote}`);
+    setStatus(`джерело: ${srcLang || '?'} · ${srcU} ${enUnitLen} сл · ${state.targetLang.toUpperCase()} ${uaUnitLen} сл · рядків ${enLines.length}${uaNote}`);
     updateLabels();
   }
 
@@ -198,44 +180,45 @@
     || tracks.find((t) => t.lang && t.lang.startsWith('en'))
     || tracks[0];
 
-  // Build EN + UA blocks from one valid base URL. Returns true on success.
+  // Build EN + UA lines from one valid base URL. Returns true on success.
   async function buildFromBase(base, body, capTlang) {
-    let enRaw = [];
-    try { enRaw = await fetchSegs(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
-    if (!enRaw.length && !capTlang && body) enRaw = parseAny(body);
-    if (!enRaw.length) return false;
+    let enUnits = [];
+    try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
+    if (!enUnits.length && !capTlang && body) enUnits = parseUnits(body);
+    if (!enUnits.length) return false;
 
     if (!srcLang) {
       try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
     }
     const sameLang = state.targetLang === srcLang;
 
-    let uaRaw = [];
+    let uaUnits = [];
     if (sameLang) {
-      uaRaw = enRaw;
+      uaUnits = enUnits;
     } else if (capTlang === state.targetLang && body) {
-      uaRaw = parseAny(body);
-      if (!uaRaw.length) { try { uaRaw = await fetchSegs(base, state.targetLang); } catch (_) {} }
+      uaUnits = parseUnits(body);
+      if (!uaUnits.length) { try { uaUnits = await fetchUnits(base, state.targetLang); } catch (_) {} }
     } else {
-      try { uaRaw = await fetchSegs(base, state.targetLang); } catch (_) { uaRaw = []; }
+      try { uaUnits = await fetchUnits(base, state.targetLang); } catch (_) { uaUnits = []; }
     }
 
-    blocks = buildBlocks(enRaw, uaRaw, sameLang);
-    enRawLen = enRaw.length; uaRawLen = uaRaw.length; curBlock = -1;
-    dbg(`готово: EN ${enRaw.length} · ${state.targetLang.toUpperCase()} ${uaRaw.length} · блоків ${blocks.length}`);
+    enLines = groupUnitsToLines(enUnits);
+    uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
+    enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
+    lastSig = null;
+    dbg(`готово: EN ${enUnits.length} сл / ${enLines.length} рядків · ${state.targetLang.toUpperCase()} ${uaUnits.length} сл`);
     updateStatus();
     return true;
   }
 
   async function loadCaptions() {
-    blocks = []; srcLang = ''; curBlock = -1; enRawLen = uaRawLen = 0;
+    enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     awaitingCapture = false;
     clearTimeout(captureTimer);
     clearDisplay();
     setStatus('завантаження…');
     dbg('--- loadCaptions для ' + currentVideoId);
 
-    // Fast path: reuse a previously captured valid URL (survives language switches).
     if (capturedBase && capturedForVideo === currentVideoId) {
       dbg('використовую збережене валідне посилання');
       if (await buildFromBase(capturedBase, capturedBody, capturedTlang)) return;
@@ -252,13 +235,12 @@
       dbg('пряме завантаження дало 0 → потрібне перехоплення');
     }
 
-    // Fallback: make the player fetch captions, then reuse its valid URL.
     awaitingCapture = true;
     setStatus('вмикаю субтитри плеєра…');
     dbg('→ прошу плеєр увімкнути CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (awaitingCapture && !blocks.length) {
+      if (awaitingCapture && !enLines.length) {
         awaitingCapture = false;
         dbg('таймаут 9с: перехоплення не сталось — імовірно у відео немає субтитрів');
         setStatus('не вдалося отримати субтитри — увімкни CC у плеєрі вручну');
@@ -266,9 +248,8 @@
     }, 9000);
   }
 
-  // Player-intercepted timedtext response — its URL carries valid tokens.
   async function handleCaptured(url, body) {
-    if (blocks.length) return; // already have captions for this video
+    if (enLines.length) return;
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
 
@@ -291,40 +272,45 @@
     }
   });
 
-  // ---------- rolling render ----------
+  // ---------- word-by-word render ----------
   function loop() {
     rafId = requestAnimationFrame(loop);
-    if (!video || !blocks.length) return;
-    const idx = findBlock(video.currentTime);
-    if (idx !== curBlock) { curBlock = idx; renderRoll(); }
+    if (!video || (!enLines.length && !uaLines.length)) return;
+    const t = video.currentTime;
+    const en = pickLine(enLines, t);
+    const ua = pickLine(uaLines, t);
+    const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+    if (sig === lastSig) return;
+    lastSig = sig;
+    renderLive(en, ua);
   }
 
-  function renderRoll() {
+  function renderLive(en, ua) {
     if (!elRoll) return;
     elRoll.textContent = '';
-    if (curBlock < 0) return;
-    const from = Math.max(0, curBlock - 2); // previous 2 (dimmed) + current
-    for (let i = from; i <= curBlock; i++) {
-      const b = blocks[i];
-      const wrap = document.createElement('div');
-      wrap.className = 'ytds-block' + (i === curBlock ? ' ytds-active' : '');
-      if (state.showEn && b.en) {
-        const e = document.createElement('div');
-        e.className = 'ytds-line ytds-en';
-        e.textContent = b.en;
-        wrap.appendChild(e);
-      }
-      if (state.showUa && b.ua) {
-        const u = document.createElement('div');
-        u.className = 'ytds-line ytds-ua';
-        u.textContent = b.ua;
-        wrap.appendChild(u);
-      }
-      elRoll.appendChild(wrap);
-    }
-    elRoll.scrollTop = elRoll.scrollHeight;
+    if (state.showEn) appendLang(enLines, en, 'ytds-en');
+    if (state.showUa) appendLang(uaLines, ua, 'ytds-ua');
   }
-  const refresh = () => renderRoll();
+
+  function appendLang(lines, sel, cls) {
+    if (sel.idx < 0) return;
+    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false); // previous line, dimmed
+    const line = lines[sel.idx];
+    const revealed = line.units.slice(0, sel.n).map((u) => u.text).join('').replace(/\s+/g, ' ').trim();
+    addLine(revealed, cls, true); // current line, building word by word
+  }
+
+  function addLine(text, cls, active) {
+    const wrap = document.createElement('div');
+    wrap.className = 'ytds-block' + (active ? ' ytds-active' : '');
+    const l = document.createElement('div');
+    l.className = 'ytds-line ' + cls;
+    l.textContent = text;
+    wrap.appendChild(l);
+    elRoll.appendChild(wrap);
+  }
+
+  const refresh = () => { lastSig = null; };
 
   // ---------- UI ----------
   function ensurePanel() {
