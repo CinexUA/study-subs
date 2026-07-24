@@ -1,9 +1,64 @@
-/* Panel that sits under the YouTube player */
+/* ---------- Themes: variables set per theme, rules below consume them ---------- */
+.ytds-panel.ytds-theme-dark {
+  --bg: #0f0f0f;
+  --border: #303030;
+  --btn-bg: #272727;
+  --btn-fg: #d0d0d0;
+  --btn-border: #3f3f3f;
+  --btn-hover: #333;
+  --btn-on-bg: #3ea6ff;
+  --btn-on-fg: #0b0b0b;
+  --en: #ffffff;
+  --tr: #ffd24a;
+  --status: #8a8a8a;
+  --sel-bg: #272727;
+  --sel-fg: #e0e0e0;
+  --log-bg: #000;
+  --log-fg: #7fd18a;
+}
+
+.ytds-panel.ytds-theme-light {
+  --bg: #ffffff;
+  --border: #d6d6d6;
+  --btn-bg: #f0f0f0;
+  --btn-fg: #333333;
+  --btn-border: #cccccc;
+  --btn-hover: #e6e6e6;
+  --btn-on-bg: #1a73e8;
+  --btn-on-fg: #ffffff;
+  --en: #111111;
+  --tr: #b26a00;
+  --status: #888888;
+  --sel-bg: #f0f0f0;
+  --sel-fg: #222222;
+  --log-bg: #f7f7f7;
+  --log-fg: #1a7f37;
+}
+
+.ytds-panel.ytds-theme-sepia {
+  --bg: #e9dcc2;
+  --border: #c8b78f;
+  --btn-bg: #dccaa1;
+  --btn-fg: #4a3b23;
+  --btn-border: #bfa878;
+  --btn-hover: #d3bf93;
+  --btn-on-bg: #8a5a2b;
+  --btn-on-fg: #f5ecd8;
+  --en: #241d14;
+  --tr: #8a4b12;
+  --status: #8a7853;
+  --sel-bg: #dccaa1;
+  --sel-fg: #4a3b23;
+  --log-bg: #f0e6cf;
+  --log-fg: #5a6a2a;
+}
+
+/* ---------- Panel ---------- */
 .ytds-panel {
   margin: 12px 0 16px;
   padding: 14px 18px;
-  background: #0f0f0f;
-  border: 1px solid #303030;
+  background: var(--bg);
+  border: 1px solid var(--border);
   border-radius: 12px;
   font-family: "Roboto", Arial, sans-serif;
 }
@@ -18,28 +73,28 @@
 
 .ytds-btn {
   cursor: pointer;
-  border: 1px solid #3f3f3f;
-  background: #272727;
-  color: #d0d0d0;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
   border-radius: 999px;
   padding: 6px 14px;
   font-size: 13px;
   line-height: 1;
   transition: background .15s, color .15s, border-color .15s;
 }
-.ytds-btn:hover { background: #333; }
+.ytds-btn:hover { background: var(--btn-hover); }
 .ytds-btn.ytds-on {
-  background: #3ea6ff;
-  border-color: #3ea6ff;
-  color: #0b0b0b;
+  background: var(--btn-on-bg);
+  border-color: var(--btn-on-bg);
+  color: var(--btn-on-fg);
   font-weight: 600;
 }
 
 .ytds-select {
   margin-left: auto;
-  background: #272727;
-  color: #e0e0e0;
-  border: 1px solid #3f3f3f;
+  background: var(--sel-bg);
+  color: var(--sel-fg);
+  border: 1px solid var(--btn-border);
   border-radius: 8px;
   padding: 6px 8px;
   font-size: 13px;
@@ -52,20 +107,20 @@
   word-break: break-word;
 }
 .ytds-en {
-  color: #ffffff;
+  color: var(--en);
   font-size: 22px;
   font-weight: 500;
   margin-bottom: 6px;
 }
 .ytds-ua {
-  color: #ffd24a;
+  color: var(--tr);
   font-size: 19px;
 }
 
 .ytds-status {
   margin-top: 8px;
   text-align: center;
-  color: #8a8a8a;
+  color: var(--status);
   font-size: 12px;
 }
 
@@ -74,13 +129,13 @@
   max-height: 160px;
   overflow-y: auto;
   padding: 8px 10px;
-  background: #000;
-  border: 1px solid #303030;
+  background: var(--log-bg);
+  border: 1px solid var(--border);
   border-radius: 8px;
   font-family: "Roboto Mono", monospace;
   font-size: 11px;
   line-height: 1.5;
-  color: #7fd18a;
+  color: var(--log-fg);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -101,7 +156,6 @@ html.ytds-fs .ytds-panel {
   margin: 0;
   border: 0;
   border-radius: 0;
-  background: #000;
   display: flex;
   flex-direction: column;
   justify-content: center;

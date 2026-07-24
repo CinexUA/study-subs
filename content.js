@@ -3,12 +3,13 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk' };
+  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia' };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
     ['it', 'Italiano'], ['ru', 'Русский']
   ];
+  const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
 
   let state = { ...DEFAULTS };
   let enSegs = [];
@@ -287,7 +288,7 @@
     if (!anchor) return false;
 
     panel = document.createElement('div');
-    panel.className = 'ytds-panel';
+    panel.className = 'ytds-panel ytds-theme-' + state.theme;
 
     const bar = document.createElement('div');
     bar.className = 'ytds-bar';
@@ -304,8 +305,22 @@
       btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
     });
 
+    const themeSel = document.createElement('select');
+    themeSel.className = 'ytds-select';
+    themeSel.title = 'Тема панелі';
+    for (const [code, label] of THEMES) {
+      const o = document.createElement('option');
+      o.value = code; o.textContent = label;
+      if (code === state.theme) o.selected = true;
+      themeSel.appendChild(o);
+    }
+    themeSel.addEventListener('change', () => {
+      state.theme = themeSel.value; saveState(); applyTheme();
+    });
+
     langSel = document.createElement('select');
     langSel.className = 'ytds-select';
+    langSel.title = 'Мова перекладу';
     for (const [code, label] of LANGS) {
       const o = document.createElement('option');
       o.value = code; o.textContent = label;
@@ -316,7 +331,7 @@
       state.targetLang = langSel.value; saveState(); loadCaptions();
     });
 
-    bar.append(btnEn, btnUa, btnHide, btnLog, langSel);
+    bar.append(btnEn, btnUa, btnHide, btnLog, themeSel, langSel);
 
     elStatus = document.createElement('div');
     elStatus.className = 'ytds-status';
@@ -371,6 +386,10 @@
 
   function applyNativeHide() {
     document.documentElement.classList.toggle('ytds-hide-native', !!state.hideNative);
+  }
+
+  function applyTheme() {
+    if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
   }
 
   // ---------- fullscreen: dock panel at the bottom, shrink the video ----------
