@@ -24,12 +24,13 @@
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elRoll, elStatus, elLog, langSel;
+  let panel, elRoll, elStatus, elLog, langSel, elClose;
   let rafId = null;
 
   // ---------- state ----------
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
+    state.reader = false; // never start a page already in reader mode
     applyNativeHide();
     ensurePanel();
     syncUi();
@@ -402,6 +403,18 @@
 
     panel.append(bar, elRoll, elStatus, elLog);
     anchor.prepend(panel);
+
+    // Floating exit button for reader mode, on <body> so it is always reachable.
+    if (!elClose) {
+      elClose = document.createElement('button');
+      elClose.className = 'ytds-close';
+      elClose.textContent = '✕';
+      elClose.title = 'Вийти з режиму читання (Esc)';
+      elClose.style.display = 'none';
+      elClose.addEventListener('click', exitReader);
+      document.body.appendChild(elClose);
+    }
+
     syncUi();
     return true;
   }
@@ -454,6 +467,7 @@
   function applyReader() {
     const on = !!state.reader;
     document.documentElement.classList.toggle('ytds-reader', on);
+    if (elClose) elClose.style.display = on ? 'flex' : 'none';
     if (!panel) return;
     if (on) {
       document.body.appendChild(panel);
@@ -464,11 +478,14 @@
     refresh();
   }
 
+  function exitReader() {
+    if (!state.reader) return;
+    state.reader = false; saveState(); applyReader(); syncUi();
+  }
+
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.reader) {
-      state.reader = false; saveState(); applyReader(); syncUi();
-    }
-  });
+    if (e.key === 'Escape' && state.reader) { e.stopPropagation(); exitReader(); }
+  }, true);
 
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
