@@ -4,7 +4,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, rollH: 96 };
+  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1 };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -128,26 +128,37 @@
     return make(nodes, 't', 1000);
   }
 
+  // Join word units, restoring spaces (json3 often drops the space segments)
+  // while keeping punctuation attached to the preceding word.
+  function joinUnits(units) {
+    let out = '';
+    for (const u of units) {
+      const txt = u.text;
+      if (out && !/\s$/.test(out) && !/^[\s.,!?;:…)\]'"”’»]/.test(txt)) out += ' ';
+      out += txt;
+    }
+    return out.replace(/\s+/g, ' ').trim();
+  }
+
   // Group words into caption-sized lines; break on sentence end or width cap,
   // but keep the per-word timing so we can reveal them progressively.
   function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
     const lines = [];
-    let cur = null, buf = '';
+    let cur = null;
     const flush = () => {
       if (cur && cur.units.length) {
-        cur.full = cur.units.map((u) => u.text).join('').replace(/\s+/g, ' ').trim();
+        cur.full = joinUnits(cur.units);
         cur.end = cur.units[cur.units.length - 1].t;
         lines.push(cur);
       }
-      cur = null; buf = '';
+      cur = null;
     };
     for (const u of units) {
       if (!cur) cur = { start: u.t, units: [] };
       cur.units.push(u);
-      buf += u.text;
-      const trimmed = buf.trim();
-      const endsSentence = /[.!?…]["'”’)\]]*$/.test(trimmed);
-      if ((endsSentence && trimmed.length >= minChars) || trimmed.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
+      const buf = joinUnits(cur.units);
+      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf);
+      if ((endsSentence && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
     }
     flush();
     return lines;
@@ -296,7 +307,7 @@
     if (sel.idx < 0) return;
     if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false); // previous line, dimmed
     const line = lines[sel.idx];
-    const revealed = line.units.slice(0, sel.n).map((u) => u.text).join('').replace(/\s+/g, ' ').trim();
+    const revealed = joinUnits(line.units.slice(0, sel.n));
     addLine(revealed, cls, true); // current line, building word by word
   }
 
@@ -345,8 +356,6 @@
     };
     const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1));
     const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1));
-    const heightMinus = mkBtn('H−', 'Нижче вікно', () => changeHeight(-30));
-    const heightPlus = mkBtn('H+', 'Вище вікно', () => changeHeight(30));
 
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
@@ -370,7 +379,7 @@
     }
     langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
-    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, heightMinus, heightPlus, themeSel, langSel);
+    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, themeSel, langSel);
 
     elRoll = document.createElement('div');
     elRoll.className = 'ytds-roll';
@@ -431,17 +440,12 @@
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   function applyLayout() {
+    // Font scale drives text size; the window height follows the content.
     if (panel) panel.style.setProperty('--font-scale', state.fontScale || 1);
-    if (elRoll) elRoll.style.minHeight = state.rollH ? state.rollH + 'px' : '';
   }
 
   function changeFont(delta) {
     state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.2);
-    saveState(); applyLayout();
-  }
-
-  function changeHeight(delta) {
-    state.rollH = clamp((state.rollH || 96) + delta, 48, 480);
     saveState(); applyLayout();
   }
 
