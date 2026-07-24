@@ -270,3 +270,33 @@ html.ytds-reader .ytds-controls {
   width: 0;
   background: var(--btn-on-bg);
 }
+
+/* Speed selector sits inline with the controls (no auto-margin like the bar). */
+.ytds-controls .ytds-select { margin-left: 0; }
+.ytds-speed { min-width: 56px; }
+
+/* Shadowing row: previous / repeat / next sentence (reader + study mode only) */
+.ytds-study-row { display: none; }
+html.ytds-reader.ytds-study .ytds-study-row {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  padding: 6px 4px 2px;
+}
+.ytds-sbtn {
+  cursor: pointer;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 999px;
+  padding: 10px 22px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ytds-sbtn:hover { background: var(--btn-hover); }
+.ytds-sbtn.ytds-primary {
+  background: var(--btn-on-bg);
+  border-color: var(--btn-on-bg);
+  color: var(--btn-on-fg);
+}

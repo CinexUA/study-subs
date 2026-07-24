@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: false };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -32,8 +32,13 @@
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elRoll, elStatus, elLog, langSel, elClose, elControls, elPlay, elTime, elFill;
+  let panel, elRoll, elStatus, elLog, langSel, elClose, elControls, elPlay, elTime, elFill, elSpeed, btnStudy, elStudy;
   let rafId = null;
+  // Shadowing: sentence boundaries (from EN units), current sentence, and the
+  // time at which playback should stop (null = free play).
+  let sentences = [];
+  let sentIdx = 0;
+  let stopAt = null;
 
   // ---------- state ----------
   chrome.storage.local.get('ytds', (r) => {
@@ -183,6 +188,63 @@
     return { idx, n: Math.max(1, n) };
   }
 
+  // Split word units into sentences (period/!/?/… ends one). Sentence end time =
+  // start of the next sentence's first word, so playback stops right at the pause.
+  function buildSentences(units) {
+    const out = [];
+    let start = null, buf = '';
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      if (start == null) { start = u.t; buf = ''; }
+      buf += u.text;
+      if (/[.!?…]["'”’)\]]*\s*$/.test(buf)) {
+        const end = (i + 1 < units.length) ? units[i + 1].t
+          : (video && video.duration ? video.duration : u.t + 3);
+        out.push({ start, end });
+        start = null;
+      }
+    }
+    if (start != null) {
+      const last = units[units.length - 1];
+      out.push({ start, end: (video && video.duration ? video.duration : last.t + 3) });
+    }
+    return out;
+  }
+
+  function findSentenceAt(t) {
+    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].end) return i;
+    return Math.max(0, sentences.length - 1);
+  }
+
+  // Seek to a sentence's start and play until its end (then loop() pauses us).
+  function playSentence(i) {
+    if (!video || !sentences.length) return;
+    sentIdx = clamp(i, 0, sentences.length - 1);
+    const s = sentences[sentIdx];
+    stopAt = s.end;
+    try { video.currentTime = s.start; } catch (_) {}
+    video.play().catch(() => {});
+    lastSig = null; lastCtl = '';
+  }
+
+  // Begin shadowing at whatever sentence the playhead is currently in.
+  function armStudy() {
+    if (!video || !sentences.length) return;
+    playSentence(findSentenceAt(video.currentTime || 0));
+  }
+
+  function setStudy(on) {
+    state.study = on; saveState();
+    document.documentElement.classList.toggle('ytds-study', !!on);
+    if (btnStudy) btnStudy.classList.toggle('ytds-on', !!on);
+    if (on) armStudy();
+    else stopAt = null; // free play again
+  }
+
+  function applySpeed() {
+    if (video) { try { video.playbackRate = state.speed || 1; } catch (_) {} }
+  }
+
   function updateStatus() {
     const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · переклад недоступний' : '';
     const srcU = (srcLang || 'en').toUpperCase();
@@ -219,15 +281,19 @@
 
     enLines = groupUnitsToLines(enUnits);
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
+    sentences = buildSentences(enUnits);
+    sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null;
-    dbg(`готово: EN ${enUnits.length} сл / ${enLines.length} рядків · ${state.targetLang.toUpperCase()} ${uaUnits.length} сл`);
+    dbg(`готово: EN ${enUnits.length} сл / ${enLines.length} рядків · ${sentences.length} речень · ${state.targetLang.toUpperCase()} ${uaUnits.length} сл`);
     updateStatus();
+    if (state.reader && state.study) armStudy();
     return true;
   }
 
   async function loadCaptions() {
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
+    sentences = []; sentIdx = 0; stopAt = null;
     awaitingCapture = false;
     clearTimeout(captureTimer);
     clearDisplay();
@@ -292,6 +358,11 @@
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
+    // Shadowing: stop the video right at the end of the current sentence.
+    if (state.study && stopAt != null && video && !video.paused && video.currentTime >= stopAt - 0.03) {
+      video.pause();
+      stopAt = null;
+    }
     if (!video || (!enLines.length && !uaLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
     const en = pickLine(enLines, t);
@@ -392,6 +463,8 @@
     const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1), 'ytds-step');
     const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1), 'ytds-step');
 
+    btnStudy = mkBtn('Навчання', 'Режим шедовінгу: речення за реченням, зупинка на крапці', () => setStudy(!state.study));
+
     const btnLog = document.createElement('button');
     btnLog.className = 'ytds-btn';
     btnLog.textContent = 'Лог';
@@ -422,7 +495,7 @@
     }
     langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
-    bar.append(btnEn, btnUa, fontMinus, fontPlus, btnLog, themeSel, langSel);
+    bar.append(btnEn, btnUa, fontMinus, fontPlus, btnStudy, btnLog, themeSel, langSel);
 
     elRoll = document.createElement('div');
     elRoll.className = 'ytds-roll';
@@ -433,13 +506,14 @@
     elLog.style.display = 'none';
 
     elControls = buildControls();
+    elStudy = buildStudyRow();
     elClose = document.createElement('button');
     elClose.className = 'ytds-close';
     elClose.textContent = '✕';
     elClose.title = 'Завершити навчання (Esc)';
     elClose.addEventListener('click', exitReader);
 
-    panel.append(elClose, bar, elRoll, elStatus, elControls, elLog);
+    panel.append(elClose, bar, elRoll, elStatus, elControls, elStudy, elLog);
     syncUi();
     return true;
   }
@@ -459,6 +533,17 @@
     elPlay = mk('▶', 'Пауза / відтворення', () => { if (!video) return; video.paused ? video.play() : video.pause(); });
     const fwd = mk('⏩', 'Вперед 10 с', () => seek(10));
 
+    elSpeed = document.createElement('select');
+    elSpeed.className = 'ytds-select ytds-speed';
+    elSpeed.title = 'Швидкість відтворення';
+    for (const v of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
+      const o = document.createElement('option');
+      o.value = String(v); o.textContent = v + '×';
+      if (v === (state.speed || 1)) o.selected = true;
+      elSpeed.appendChild(o);
+    }
+    elSpeed.addEventListener('change', () => { state.speed = parseFloat(elSpeed.value); saveState(); applySpeed(); });
+
     elTime = document.createElement('span');
     elTime.className = 'ytds-time';
     elTime.textContent = '0:00 / 0:00';
@@ -474,7 +559,25 @@
       video.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * video.duration;
     });
 
-    wrap.append(back, elPlay, fwd, elTime, track);
+    wrap.append(back, elPlay, fwd, elSpeed, elTime, track);
+    return wrap;
+  }
+
+  // Shadowing controls: previous / repeat / next sentence.
+  function buildStudyRow() {
+    const wrap = document.createElement('div');
+    wrap.className = 'ytds-study-row';
+    const mk = (label, title, fn, cls) => {
+      const b = document.createElement('button');
+      b.className = 'ytds-sbtn' + (cls ? ' ' + cls : '');
+      b.textContent = label; b.title = title;
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const prev = mk('← Попереднє', 'Попереднє речення', () => playSentence(sentIdx - 1));
+    const rep = mk('↻ Повторити', 'Програти це речення від початку до кінця', () => playSentence(sentIdx), 'ytds-primary');
+    const next = mk('Наступне →', 'Наступне речення', () => playSentence(sentIdx + 1));
+    wrap.append(prev, rep, next);
     return wrap;
   }
 
@@ -499,6 +602,8 @@
       if (b.dataset.key) b.classList.toggle('ytds-on', !!state[b.dataset.key]);
     });
     if (langSel) langSel.value = state.targetLang;
+    if (btnStudy) btnStudy.classList.toggle('ytds-on', !!state.study);
+    if (elSpeed) elSpeed.value = String(state.speed || 1);
     updateLabels();
     applyLayout();
     refresh();
@@ -531,14 +636,18 @@
     state.reader = true; saveState();
     document.body.appendChild(panel);
     document.documentElement.classList.add('ytds-reader');
+    document.documentElement.classList.toggle('ytds-study', !!state.study);
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
     syncUi(); refresh();
+    if (state.study) armStudy();
   }
 
   function exitReader() {
     if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
     state.reader = false; saveState();
+    stopAt = null; // let the video play normally again outside study mode
     document.documentElement.classList.remove('ytds-reader');
+    document.documentElement.classList.remove('ytds-study');
     if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
     if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
     syncUi();
@@ -573,6 +682,7 @@
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {
       currentVideoId = id;
+      applySpeed(); // playbackRate resets on each new video
       loadCaptions();
     }
   }
