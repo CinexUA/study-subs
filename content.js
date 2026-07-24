@@ -36,7 +36,8 @@
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
   // time at which playback should stop (null = free play).
-  let sentences = [];
+  let sentences = [];    // EN sentences (drive playback timing + EN reveal)
+  let uaSentences = [];  // translation sentences, index-aligned to `sentences`
   let sentIdx = 0;
   let stopAt = null;
 
@@ -188,32 +189,31 @@
     return { idx, n: Math.max(1, n) };
   }
 
-  // Split word units into sentences (period/!/?/… ends one). Sentence end time =
-  // start of the next sentence's first word, so playback stops right at the pause.
+  // Split word units into sentences (period/!/?/… ends one). Each sentence keeps
+  // its own units (for word-by-word reveal) and an end time = just before the
+  // next word's onset, so playback stops in the pause.
   function buildSentences(units) {
     const out = [];
-    let start = null, buf = '';
+    let cur = null, buf = '';
     for (let i = 0; i < units.length; i++) {
       const u = units[i];
-      if (start == null) { start = u.t; buf = ''; }
+      if (!cur) { cur = { start: u.t, units: [] }; buf = ''; }
+      cur.units.push(u);
       buf += u.text;
       if (/[.!?…]["'”’)\]]*\s*$/.test(buf)) {
-        let end;
-        if (i + 1 < units.length) {
+        cur.end = (i + 1 < units.length)
           // Stop in the pause BEFORE the next word, so its onset is neither
-          // heard nor revealed — but keep at least a little of the last word
-          // if the gap happens to be tiny.
-          end = Math.max(u.t + 0.12, units[i + 1].t - 0.2);
-        } else {
-          end = (video && video.duration ? video.duration : u.t + 3);
-        }
-        out.push({ start, end });
-        start = null;
+          // heard nor revealed — but keep at least a little of the last word.
+          ? Math.max(u.t + 0.12, units[i + 1].t - 0.2)
+          : (video && video.duration ? video.duration : u.t + 3);
+        out.push(cur);
+        cur = null;
       }
     }
-    if (start != null) {
-      const last = units[units.length - 1];
-      out.push({ start, end: (video && video.duration ? video.duration : last.t + 3) });
+    if (cur) {
+      const last = cur.units[cur.units.length - 1];
+      cur.end = (video && video.duration ? video.duration : last.t + 3);
+      out.push(cur);
     }
     return out;
   }
@@ -289,6 +289,7 @@
     enLines = groupUnitsToLines(enUnits);
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
     sentences = buildSentences(enUnits);
+    uaSentences = sameLang ? sentences : buildSentences(uaUnits);
     sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null;
@@ -300,7 +301,7 @@
 
   async function loadCaptions() {
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
-    sentences = []; sentIdx = 0; stopAt = null;
+    sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
     awaitingCapture = false;
     clearTimeout(captureTimer);
     clearDisplay();
@@ -372,6 +373,20 @@
     }
     if (!video || (!enLines.length && !uaLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
+
+    // Study mode: reveal only the current sentence, EN and UA index-aligned,
+    // so the next sentence's words can never bleed across the two tracks.
+    if (state.study && sentences.length) {
+      const enS = sentences[sentIdx];
+      const enN = revealCount(enS, t);
+      const uaN = uaRevealCount(enS, uaSentences[sentIdx], t);
+      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+      if (sig === lastSig) return;
+      lastSig = sig;
+      renderStudy(enN, uaN);
+      return;
+    }
+
     const en = pickLine(enLines, t);
     const ua = pickLine(uaLines, t);
     const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
@@ -380,16 +395,50 @@
     renderLive(en, ua);
   }
 
+  // How many EN words of a sentence should be visible at time t.
+  function revealCount(s, t) {
+    if (!s) return 0;
+    let n = 0;
+    for (const u of s.units) { if (u.t <= t + LEAD) n++; else break; }
+    return Math.max(1, n);
+  }
+
+  // Translation reveal follows the EN sentence's PROGRESS (not UA timestamps),
+  // so it stays in step and shows fully exactly when the sentence ends.
+  function uaRevealCount(enS, uaS, t) {
+    if (!enS || !uaS) return 0;
+    const span = (enS.end - enS.start) || 1;
+    const p = clamp((t - enS.start) / span, 0, 1);
+    return Math.max(1, Math.ceil(p * uaS.units.length));
+  }
+
+  function mkZone(cls) {
+    const d = document.createElement('div');
+    d.className = 'ytds-zone ' + cls;
+    return d;
+  }
+
+  function renderStudy(enN, uaN) {
+    if (!elRoll) return;
+    elRoll.dataset.ph = '';
+    elRoll.textContent = '';
+    const zEn = mkZone('ytds-zone-en');
+    const zUa = mkZone('ytds-zone-ua');
+    elRoll.append(zEn, zUa);
+    const enS = sentences[sentIdx];
+    const uaS = uaSentences[sentIdx];
+    if (state.showEn && enS) addLine(joinUnits(enS.units.slice(0, enN)), 'ytds-en', true, zEn);
+    if (state.showUa && uaS) addLine(joinUnits(uaS.units.slice(0, uaN)), 'ytds-ua', true, zUa);
+  }
+
   function renderLive(en, ua) {
     if (!elRoll) return;
     elRoll.dataset.ph = '';
     elRoll.textContent = '';
     // Two fixed zones split at the screen midline: EN sits just ABOVE it
     // (grows upward, its baseline never moves), the translation just below.
-    const zEn = document.createElement('div');
-    zEn.className = 'ytds-zone ytds-zone-en';
-    const zUa = document.createElement('div');
-    zUa.className = 'ytds-zone ytds-zone-ua';
+    const zEn = mkZone('ytds-zone-en');
+    const zUa = mkZone('ytds-zone-ua');
     elRoll.append(zEn, zUa);
     if (state.showEn) appendLang(enLines, en, 'ytds-en', zEn);
     if (state.showUa) appendLang(uaLines, ua, 'ytds-ua', zUa);
