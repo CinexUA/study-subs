@@ -130,10 +130,22 @@
     return push(nodes, 't', 'd', 1000);
   }
 
-  // Merge YouTube's short time-chunks into whole sentences so the text is not
-  // torn mid-phrase. Flushes on sentence-ending punctuation, or on a length /
-  // duration cap (fallback for auto-captions that have no punctuation).
-  function groupSegs(segs, maxChars = 160, maxDur = 7) {
+  // Re-group YouTube's short time-chunks into readable units that are never
+  // cut mid-sentence. We stream the text character by character (so a sentence
+  // boundary *inside* a chunk splits cleanly), flush right after a sentence's
+  // terminal punctuation, and merge very short sentences together so the line
+  // doesn't flicker. maxChars/maxDur are hard caps for punctuation-less
+  // auto-captions.
+  function groupSegs(segs, minChars = 50, maxChars = 200, maxDur = 8) {
+    // Build a character stream carrying each char's source timing.
+    const chars = [];
+    for (const s of segs) {
+      const t = (s.text || '').trim();
+      if (!t) continue;
+      if (chars.length && chars[chars.length - 1].ch !== ' ') chars.push({ ch: ' ', start: s.start, end: s.end });
+      for (const ch of t) chars.push({ ch, start: s.start, end: s.end });
+    }
+
     const out = [];
     let buf = '', start = null, end = null;
     const flush = () => {
@@ -141,14 +153,21 @@
       if (text) out.push({ start, end, text });
       buf = ''; start = null;
     };
-    for (const s of segs) {
-      const t = (s.text || '').trim();
-      if (!t) continue;
-      if (start === null) start = s.start;
-      end = s.end;
-      buf += (buf ? ' ' : '') + t;
-      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf);
-      if (endsSentence || buf.length >= maxChars || (end - start) >= maxDur) flush();
+
+    for (let i = 0; i < chars.length; i++) {
+      const c = chars[i];
+      if (start === null) {
+        if (c.ch === ' ') continue; // skip leading spaces
+        start = c.start;
+      }
+      buf += c.ch;
+      end = c.end;
+      const next = chars[i + 1];
+      const nextIsBreak = !next || next.ch === ' ';
+      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf) && nextIsBreak;
+
+      if (endsSentence && buf.trim().length >= minChars) flush();
+      else if (buf.length >= maxChars || (end - start) >= maxDur) flush(); // no-punctuation fallback
     }
     flush();
     return out;
