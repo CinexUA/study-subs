@@ -100,17 +100,32 @@
   font-size: 13px;
 }
 
+/* Rolling transcript: current block bright at the bottom, previous ones dimmed. */
+.ytds-roll {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 40vh;
+  overflow: hidden;
+}
+.ytds-block {
+  opacity: 0.4;
+  transition: opacity 0.25s ease;
+}
+.ytds-block.ytds-active {
+  opacity: 1;
+}
+
 .ytds-line {
   text-align: center;
   line-height: 1.4;
-  min-height: 1.4em;
   word-break: break-word;
 }
 .ytds-en {
   color: var(--en);
   font-size: 22px;
   font-weight: 500;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .ytds-ua {
   color: var(--tr);
@@ -158,11 +173,18 @@ html.ytds-fs .ytds-panel {
   border-radius: 0;
   display: flex;
   flex-direction: column;
-  justify-content: center;
+  justify-content: flex-end;
   box-sizing: border-box;
 }
-html.ytds-fs .ytds-en { font-size: 30px; }
-html.ytds-fs .ytds-ua { font-size: 26px; }
+html.ytds-fs .ytds-roll {
+  max-height: none;
+  justify-content: flex-end;
+  gap: 6px;
+}
+html.ytds-fs .ytds-en { font-size: 26px; }
+html.ytds-fs .ytds-ua { font-size: 22px; }
+/* keep the toolbar and status compact in fullscreen */
+html.ytds-fs .ytds-status { display: none; }
 
 /* Shrink the video so the docked panel does not cover it.
    `!important` beats YouTube's inline sizing, so it survives re-layouts. */

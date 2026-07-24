@@ -1,5 +1,6 @@
 // Runs in the ISOLATED world. Builds the subtitle panel under the video,
-// gets captions (direct, or via the player's intercepted request), and syncs them.
+// gets captions (direct, or via the player's intercepted request), groups them
+// into whole-sentence blocks and shows them as a rolling transcript.
 (() => {
   'use strict';
 
@@ -12,32 +13,17 @@
   const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
 
   let state = { ...DEFAULTS };
-  let enSegs = [];
-  let uaSegs = [];
+  let blocks = [];           // [{ start, end, en, ua }]
+  let curBlock = -1;
+  let enRawLen = 0, uaRawLen = 0;
   let srcLang = '';
   let currentVideoId = null;
   let awaitingCapture = false;
   let captureTimer = null;
-  let capturedBase = null;   // a valid, tokened timedtext URL we can reuse
-  let capturedBody = null;   // the intercepted response body (already a translation)
-  let capturedTlang = '';
-  let capturedForVideo = null;
+  let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elEn, elUa, elStatus, elLog, langSel;
+  let panel, elRoll, elStatus, elLog, langSel;
   let rafId = null;
-  let lastEn = null, lastUa = null;
-
-  // ---------- debug log ----------
-  function dbg(msg) {
-    const time = new Date().toLocaleTimeString();
-    console.log('[YTDS]', msg);
-    if (!elLog) return;
-    const line = document.createElement('div');
-    line.textContent = `${time}  ${msg}`;
-    elLog.appendChild(line);
-    while (elLog.childElementCount > 60) elLog.firstChild.remove();
-    elLog.scrollTop = elLog.scrollHeight;
-  }
 
   // ---------- state ----------
   chrome.storage.local.get('ytds', (r) => {
@@ -48,10 +34,21 @@
   });
   const saveState = () => chrome.storage.local.set({ ytds: state });
 
-  // ---------- helpers ----------
-  const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
-  const setText = (el, txt) => { if (el) el.textContent = txt; };
+  // ---------- debug log ----------
+  function dbg(msg) {
+    console.log('[YTDS]', msg);
+    if (!elLog) return;
+    const line = document.createElement('div');
+    line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+    elLog.appendChild(line);
+    while (elLog.childElementCount > 60) elLog.firstChild.remove();
+    elLog.scrollTop = elLog.scrollHeight;
+  }
 
+  const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
+  const clearDisplay = () => { if (elRoll) elRoll.textContent = ''; };
+
+  // ---------- MAIN-world bridge ----------
   function requestTracks() {
     return new Promise((resolve) => {
       let done = false, tries = 0;
@@ -71,7 +68,7 @@
     });
   }
 
-  // Keep the valid token params, drop format/translation so we can re-add ours.
+  // ---------- caption fetching / parsing ----------
   function reuseBase(url) {
     try {
       const u = new URL(url, location.origin);
@@ -81,6 +78,7 @@
     } catch (_) { return url; }
   }
 
+  // Returns raw time-chunks [{ start, end, text }] (no grouping).
   async function fetchSegs(baseUrl, tlang) {
     const tl = tlang ? '&tlang=' + encodeURIComponent(tlang) : '';
     for (const fmt of ['&fmt=json3', '']) {
@@ -89,7 +87,7 @@
       const body = (await res.text()).trim();
       if (!body) continue;
       const segs = parseAny(body);
-      if (segs.length) return groupSegs(segs);
+      if (segs.length) return segs;
     }
     return [];
   }
@@ -97,9 +95,7 @@
   function parseAny(body) {
     body = (body || '').trim();
     if (!body) return [];
-    if (body[0] === '{') {
-      try { return parseJson3(JSON.parse(body)); } catch (_) { return []; }
-    }
+    if (body[0] === '{') { try { return parseJson3(JSON.parse(body)); } catch (_) { return []; } }
     return parseXml(body);
   }
 
@@ -124,20 +120,14 @@
       return text ? { start, end: start + dur, text } : null;
     }).filter(Boolean);
 
-    let nodes = [...doc.querySelectorAll('text')];       // srv1: seconds
+    let nodes = [...doc.querySelectorAll('text')];
     if (nodes.length) return push(nodes, 'start', 'dur', 1);
-    nodes = [...doc.querySelectorAll('p')];              // srv3/ttml: ms
+    nodes = [...doc.querySelectorAll('p')];
     return push(nodes, 't', 'd', 1000);
   }
 
-  // Re-group YouTube's short time-chunks into readable units that are never
-  // cut mid-sentence. We stream the text character by character (so a sentence
-  // boundary *inside* a chunk splits cleanly), flush right after a sentence's
-  // terminal punctuation, and merge very short sentences together so the line
-  // doesn't flicker. maxChars/maxDur are hard caps for punctuation-less
-  // auto-captions.
+  // Re-group short chunks into whole-sentence blocks; never cut mid-sentence.
   function groupSegs(segs, minChars = 50, maxChars = 200, maxDur = 8) {
-    // Build a character stream carrying each char's source timing.
     const chars = [];
     for (const s of segs) {
       const t = (s.text || '').trim();
@@ -145,50 +135,60 @@
       if (chars.length && chars[chars.length - 1].ch !== ' ') chars.push({ ch: ' ', start: s.start, end: s.end });
       for (const ch of t) chars.push({ ch, start: s.start, end: s.end });
     }
-
     const out = [];
     let buf = '', start = null, end = null;
-    const flush = () => {
-      const text = buf.trim();
-      if (text) out.push({ start, end, text });
-      buf = ''; start = null;
-    };
-
+    const flush = () => { const text = buf.trim(); if (text) out.push({ start, end, text }); buf = ''; start = null; };
     for (let i = 0; i < chars.length; i++) {
       const c = chars[i];
-      if (start === null) {
-        if (c.ch === ' ') continue; // skip leading spaces
-        start = c.start;
-      }
-      buf += c.ch;
-      end = c.end;
+      if (start === null) { if (c.ch === ' ') continue; start = c.start; }
+      buf += c.ch; end = c.end;
       const next = chars[i + 1];
       const nextIsBreak = !next || next.ch === ' ';
       const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf) && nextIsBreak;
-
       if (endsSentence && buf.trim().length >= minChars) flush();
-      else if (buf.length >= maxChars || (end - start) >= maxDur) flush(); // no-punctuation fallback
+      else if (buf.length >= maxChars || (end - start) >= maxDur) flush();
     }
     flush();
     return out;
   }
 
-  function findSeg(segs, t) {
-    let lo = 0, hi = segs.length - 1, ans = -1;
+  // Pair each EN sentence block with the overlapping UA chunks (same timeline).
+  function buildBlocks(enRaw, uaRaw, sameLang) {
+    const enBlocks = groupSegs(enRaw);
+    return enBlocks.map((b) => ({
+      start: b.start,
+      end: b.end,
+      en: b.text,
+      ua: sameLang ? b.text : joinOverlap(uaRaw, b.start, b.end)
+    }));
+  }
+
+  function joinOverlap(raw, start, end) {
+    const parts = [];
+    for (const s of raw) {
+      const mid = (s.start + s.end) / 2;
+      if (mid >= start - 0.05 && mid < end + 0.05) {
+        const t = (s.text || '').trim();
+        if (t) parts.push(t);
+      }
+    }
+    return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function findBlock(t) {
+    let lo = 0, hi = blocks.length - 1, ans = -1;
     while (lo <= hi) {
       const mid = (lo + hi) >> 1;
-      if (segs[mid].start <= t) { ans = mid; lo = mid + 1; }
+      if (blocks[mid].start <= t) { ans = mid; lo = mid + 1; }
       else hi = mid - 1;
     }
-    if (ans === -1) return null;
-    const s = segs[ans];
-    return t <= s.end + 0.3 ? s : null;
+    return ans;
   }
 
   function updateStatus() {
-    const uaNote = (state.targetLang !== srcLang && !uaSegs.length) ? ' · переклад недоступний' : '';
+    const uaNote = (state.targetLang !== srcLang && !uaRawLen) ? ' · переклад недоступний' : '';
     const srcU = (srcLang || 'en').toUpperCase();
-    setStatus(`джерело: ${srcLang || '?'} · ${srcU} ${enSegs.length} · ${state.targetLang.toUpperCase()} ${uaSegs.length}${uaNote}`);
+    setStatus(`джерело: ${srcLang || '?'} · ${srcU} ${enRawLen} · ${state.targetLang.toUpperCase()} ${uaRawLen} · блоків ${blocks.length}${uaNote}`);
     updateLabels();
   }
 
@@ -198,38 +198,40 @@
     || tracks.find((t) => t.lang && t.lang.startsWith('en'))
     || tracks[0];
 
-  // Build EN + UA segments from one valid, tokened base URL.
+  // Build EN + UA blocks from one valid base URL. Returns true on success.
   async function buildFromBase(base, body, capTlang) {
-    let en = [];
-    try { en = await fetchSegs(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
-    if (!en.length && !capTlang && body) en = groupSegs(parseAny(body));
-    if (!en.length) return false;
+    let enRaw = [];
+    try { enRaw = await fetchSegs(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
+    if (!enRaw.length && !capTlang && body) enRaw = parseAny(body);
+    if (!enRaw.length) return false;
 
-    enSegs = en;
     if (!srcLang) {
       try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
     }
+    const sameLang = state.targetLang === srcLang;
 
-    if (state.targetLang === srcLang) {
-      uaSegs = enSegs;
+    let uaRaw = [];
+    if (sameLang) {
+      uaRaw = enRaw;
     } else if (capTlang === state.targetLang && body) {
-      uaSegs = groupSegs(parseAny(body)); // captured body already is the target translation
-      if (!uaSegs.length) { try { uaSegs = await fetchSegs(base, state.targetLang); } catch (_) {} }
+      uaRaw = parseAny(body);
+      if (!uaRaw.length) { try { uaRaw = await fetchSegs(base, state.targetLang); } catch (_) {} }
     } else {
-      try { uaSegs = await fetchSegs(base, state.targetLang); } catch (_) { uaSegs = []; }
+      try { uaRaw = await fetchSegs(base, state.targetLang); } catch (_) { uaRaw = []; }
     }
 
-    dbg(`готово: EN ${enSegs.length} · ${state.targetLang.toUpperCase()} ${uaSegs.length}`);
-    lastEn = lastUa = null;
+    blocks = buildBlocks(enRaw, uaRaw, sameLang);
+    enRawLen = enRaw.length; uaRawLen = uaRaw.length; curBlock = -1;
+    dbg(`готово: EN ${enRaw.length} · ${state.targetLang.toUpperCase()} ${uaRaw.length} · блоків ${blocks.length}`);
     updateStatus();
     return true;
   }
 
   async function loadCaptions() {
-    enSegs = []; uaSegs = []; srcLang = ''; lastEn = lastUa = null;
+    blocks = []; srcLang = ''; curBlock = -1; enRawLen = uaRawLen = 0;
     awaitingCapture = false;
     clearTimeout(captureTimer);
-    setText(elEn, ''); setText(elUa, '');
+    clearDisplay();
     setStatus('завантаження…');
     dbg('--- loadCaptions для ' + currentVideoId);
 
@@ -246,24 +248,17 @@
     if (tracks.length) {
       const src = pickSrc(tracks);
       srcLang = src.lang || '';
-      try { enSegs = await fetchSegs(src.baseUrl, null); } catch (e) { dbg('пряме завантаження впало: ' + e.message); }
-      dbg(`пряме завантаження EN: ${enSegs.length} рядків`);
-      if (enSegs.length) {
-        await loadTranslation(src.baseUrl);
-        dbg(`переклад ${state.targetLang}: ${uaSegs.length} рядків`);
-        updateStatus();
-        lastEn = lastUa = null;
-        return;
-      }
+      if (await buildFromBase(src.baseUrl, null, '')) { dbg('пряме завантаження спрацювало'); return; }
+      dbg('пряме завантаження дало 0 → потрібне перехоплення');
     }
 
     // Fallback: make the player fetch captions, then reuse its valid URL.
     awaitingCapture = true;
     setStatus('вмикаю субтитри плеєра…');
-    dbg('пряме не дало результату → прошу плеєр увімкнути CC (YTDS_ENABLE)');
+    dbg('→ прошу плеєр увімкнути CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (awaitingCapture && !enSegs.length) {
+      if (awaitingCapture && !blocks.length) {
         awaitingCapture = false;
         dbg('таймаут 9с: перехоплення не сталось — імовірно у відео немає субтитрів');
         setStatus('не вдалося отримати субтитри — увімкни CC у плеєрі вручну');
@@ -271,32 +266,18 @@
     }, 9000);
   }
 
-  async function loadTranslation(base) {
-    if (state.targetLang === srcLang) { uaSegs = enSegs; return; }
-    try { uaSegs = await fetchSegs(base, state.targetLang); } catch (_) { uaSegs = []; }
-  }
-
-  // Player-intercepted timedtext response — its URL carries valid tokens (pot),
-  // so we cache it and reuse it for the source, the translation, and later
-  // language switches. Works any time the player loads captions.
+  // Player-intercepted timedtext response — its URL carries valid tokens.
   async function handleCaptured(url, body) {
-    if (enSegs.length) return; // already have captions for this video
-    const base = reuseBase(url); // keeps valid tokens, drops fmt & tlang
+    if (blocks.length) return; // already have captions for this video
+    const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
 
-    // Cache for reuse (language switches, reloads) — no more interception needed.
-    capturedBase = base;
-    capturedBody = body;
-    capturedTlang = capTlang;
-    capturedForVideo = currentVideoId;
+    capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
 
-    if (!(await buildFromBase(base, body, capTlang))) {
-      dbg('капчур без корисних EN — чекаю інший');
-      return;
-    }
+    if (!(await buildFromBase(base, body, capTlang))) { dbg('капчур без корисних EN — чекаю інший'); return; }
     awaitingCapture = false;
     clearTimeout(captureTimer);
-    window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*'); // stop the enable retries
+    window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
   }
 
   window.addEventListener('message', (e) => {
@@ -310,23 +291,44 @@
     }
   });
 
-  // ---------- render loop ----------
+  // ---------- rolling render ----------
   function loop() {
     rafId = requestAnimationFrame(loop);
-    if (!video || (!enSegs.length && !uaSegs.length)) return;
-    const t = video.currentTime;
-    const en = state.showEn ? findSeg(enSegs, t) : null;
-    const ua = state.showUa ? findSeg(uaSegs, t) : null;
-    const enText = en ? en.text : '';
-    const uaText = ua ? ua.text : '';
-    if (enText !== lastEn) { setText(elEn, enText); lastEn = enText; }
-    if (uaText !== lastUa) { setText(elUa, uaText); lastUa = uaText; }
+    if (!video || !blocks.length) return;
+    const idx = findBlock(video.currentTime);
+    if (idx !== curBlock) { curBlock = idx; renderRoll(); }
   }
+
+  function renderRoll() {
+    if (!elRoll) return;
+    elRoll.textContent = '';
+    if (curBlock < 0) return;
+    const from = Math.max(0, curBlock - 2); // previous 2 (dimmed) + current
+    for (let i = from; i <= curBlock; i++) {
+      const b = blocks[i];
+      const wrap = document.createElement('div');
+      wrap.className = 'ytds-block' + (i === curBlock ? ' ytds-active' : '');
+      if (state.showEn && b.en) {
+        const e = document.createElement('div');
+        e.className = 'ytds-line ytds-en';
+        e.textContent = b.en;
+        wrap.appendChild(e);
+      }
+      if (state.showUa && b.ua) {
+        const u = document.createElement('div');
+        u.className = 'ytds-line ytds-ua';
+        u.textContent = b.ua;
+        wrap.appendChild(u);
+      }
+      elRoll.appendChild(wrap);
+    }
+    elRoll.scrollTop = elRoll.scrollHeight;
+  }
+  const refresh = () => renderRoll();
 
   // ---------- UI ----------
   function ensurePanel() {
     if (panel && document.body.contains(panel)) return true;
-
     const anchor = document.querySelector('#below') || document.querySelector('#secondary');
     if (!anchor) return false;
 
@@ -357,9 +359,7 @@
       if (code === state.theme) o.selected = true;
       themeSel.appendChild(o);
     }
-    themeSel.addEventListener('change', () => {
-      state.theme = themeSel.value; saveState(); applyTheme();
-    });
+    themeSel.addEventListener('change', () => { state.theme = themeSel.value; saveState(); applyTheme(); });
 
     langSel = document.createElement('select');
     langSel.className = 'ytds-select';
@@ -370,23 +370,19 @@
       if (code === state.targetLang) o.selected = true;
       langSel.appendChild(o);
     }
-    langSel.addEventListener('change', () => {
-      state.targetLang = langSel.value; saveState(); loadCaptions();
-    });
+    langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
     bar.append(btnEn, btnUa, btnHide, btnLog, themeSel, langSel);
 
+    elRoll = document.createElement('div');
+    elRoll.className = 'ytds-roll';
     elStatus = document.createElement('div');
     elStatus.className = 'ytds-status';
-    elEn = document.createElement('div');
-    elEn.className = 'ytds-line ytds-en';
-    elUa = document.createElement('div');
-    elUa.className = 'ytds-line ytds-ua';
     elLog = document.createElement('div');
     elLog.className = 'ytds-log';
     elLog.style.display = 'none';
 
-    panel.append(bar, elEn, elUa, elStatus, elLog);
+    panel.append(bar, elRoll, elStatus, elLog);
     anchor.prepend(panel);
     syncUi();
     return true;
@@ -402,7 +398,7 @@
       saveState();
       syncUi();
       if (extra) extra();
-      lastEn = lastUa = null;
+      refresh();
     });
     return b;
   }
@@ -412,13 +408,11 @@
     panel.querySelectorAll('.ytds-btn').forEach((b) => {
       if (b.dataset.key) b.classList.toggle('ytds-on', !!state[b.dataset.key]);
     });
-    if (elEn) elEn.style.display = state.showEn ? '' : 'none';
-    if (elUa) elUa.style.display = state.showUa ? '' : 'none';
     if (langSel) langSel.value = state.targetLang;
     updateLabels();
+    refresh();
   }
 
-  // Toggle buttons show the actual language codes (source vs. chosen target).
   function updateLabels() {
     if (!panel) return;
     const bSrc = panel.querySelector('[data-key="showEn"]');
@@ -435,7 +429,7 @@
     if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
   }
 
-  // ---------- fullscreen: dock panel at the bottom, shrink the video ----------
+  // ---------- fullscreen ----------
   function onFullscreen() {
     const fs = document.fullscreenElement;
     const player = document.getElementById('movie_player');
