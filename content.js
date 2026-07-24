@@ -292,7 +292,7 @@
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
-    if (!video || (!enLines.length && !uaLines.length)) return;
+    if (!video || (!enLines.length && !uaLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
     const en = pickLine(enLines, t);
     const ua = pickLine(uaLines, t);
@@ -304,9 +304,24 @@
 
   function renderLive(en, ua) {
     if (!elRoll) return;
+    elRoll.dataset.ph = '';
     elRoll.textContent = '';
     if (state.showEn) appendLang(enLines, en, 'ytds-en');
     if (state.showUa) appendLang(uaLines, ua, 'ytds-ua');
+  }
+
+  // Shown in reader when there are no captions yet: surfaces the status/error.
+  function showPlaceholder() {
+    if (!elRoll) return;
+    const msg = (elStatus && elStatus.textContent) || 'завантаження субтитрів…';
+    if (elRoll.dataset.ph === msg) return;
+    elRoll.dataset.ph = msg;
+    elRoll.textContent = '';
+    const d = document.createElement('div');
+    d.className = 'ytds-line ytds-ua';
+    d.style.opacity = '0.75';
+    d.textContent = msg;
+    elRoll.appendChild(d);
   }
 
   function appendLang(lines, sel, cls) {
