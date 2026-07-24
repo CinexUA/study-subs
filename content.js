@@ -306,8 +306,15 @@
     if (!elRoll) return;
     elRoll.dataset.ph = '';
     elRoll.textContent = '';
-    if (state.showEn) appendLang(enLines, en, 'ytds-en');
-    if (state.showUa) appendLang(uaLines, ua, 'ytds-ua');
+    // Two fixed zones split at the screen midline: EN sits just ABOVE it
+    // (grows upward, its baseline never moves), the translation just below.
+    const zEn = document.createElement('div');
+    zEn.className = 'ytds-zone ytds-zone-en';
+    const zUa = document.createElement('div');
+    zUa.className = 'ytds-zone ytds-zone-ua';
+    elRoll.append(zEn, zUa);
+    if (state.showEn) appendLang(enLines, en, 'ytds-en', zEn);
+    if (state.showUa) appendLang(uaLines, ua, 'ytds-ua', zUa);
   }
 
   // Shown in reader when there are no captions yet: surfaces the status/error.
@@ -324,21 +331,21 @@
     elRoll.appendChild(d);
   }
 
-  function appendLang(lines, sel, cls) {
+  function appendLang(lines, sel, cls, target) {
     if (sel.idx < 0) return;
-    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false);
+    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false, target);
     const line = lines[sel.idx];
-    addLine(joinUnits(line.units.slice(0, sel.n)), cls, true);
+    addLine(joinUnits(line.units.slice(0, sel.n)), cls, true, target);
   }
 
-  function addLine(text, cls, active) {
+  function addLine(text, cls, active, target) {
     const wrap = document.createElement('div');
     wrap.className = 'ytds-block' + (active ? ' ytds-active' : '');
     const l = document.createElement('div');
     l.className = 'ytds-line ' + cls;
     l.textContent = text;
     wrap.appendChild(l);
-    elRoll.appendChild(wrap);
+    (target || elRoll).appendChild(wrap);
   }
 
   const refresh = () => { lastSig = null; };
