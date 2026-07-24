@@ -441,7 +441,8 @@
 
   function applyLayout() {
     // Font scale drives text size; the window height follows the content.
-    if (panel) panel.style.setProperty('--font-scale', state.fontScale || 1);
+    // Set on <html> so the fullscreen video-shrink rule can read it too.
+    document.documentElement.style.setProperty('--font-scale', state.fontScale || 1);
   }
 
   function changeFont(delta) {
