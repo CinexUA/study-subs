@@ -162,10 +162,8 @@
   word-break: break-word;
 }
 
-/* Hide YouTube's own captions drawn over the video */
-html.ytds-hide-native .ytp-caption-window-container {
-  display: none !important;
-}
+/* Launch button injected into the YouTube player controls */
+.ytds-launch svg { width: 100%; height: 100%; }
 
 /* ---------- Reader mode: full-screen overlay, subtitles centered ---------- */
 html.ytds-reader .ytds-panel {
@@ -250,43 +248,4 @@ html.ytds-reader .ytds-controls {
   height: 100%;
   width: 0;
   background: var(--btn-on-bg);
-}
-
-/* ---------- Fullscreen: dock panel at the bottom, push the video up ---------- */
-html.ytds-fs .ytds-panel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  max-height: 60vh;      /* height follows content, capped so the video stays visible */
-  z-index: 2147483647;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 12px 18px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  box-sizing: border-box;
-}
-html.ytds-fs .ytds-roll {
-  max-height: none;
-  justify-content: flex-end;
-  gap: 6px;
-}
-html.ytds-fs .ytds-en { font-size: calc(26px * var(--font-scale, 1)); }
-html.ytds-fs .ytds-ua { font-size: calc(22px * var(--font-scale, 1)); }
-/* keep the toolbar and status compact in fullscreen */
-html.ytds-fs .ytds-status { display: none; }
-
-/* Shrink the video so the docked panel does not cover it.
-   `!important` beats YouTube's inline sizing, so it survives re-layouts. */
-html.ytds-fs #movie_player.ytp-fullscreen video.html5-main-video {
-  height: calc(100vh - var(--dock-h, 200px)) !important;
-  width: auto !important;
-  max-width: 100vw !important;
-  top: 0 !important;
-  bottom: var(--dock-h, 200px) !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
 }

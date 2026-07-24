@@ -1,10 +1,11 @@
-// Runs in the ISOLATED world. Builds the subtitle panel under the video,
-// gets captions (direct, or via the player's intercepted request), and reveals
-// them word by word (like YouTube), one caption-sized line at a time.
+// Runs in the ISOLATED world.
+// It stays out of YouTube's UI: it only adds one button to the player controls.
+// Clicking it opens a full-screen study overlay with dual subtitles that reveal
+// word by word, plus its own playback controls.
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, hideNative: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -12,6 +13,13 @@
   ];
   const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
   const LEAD = 0.12;
+
+  // Subtitle-box icon for the player-controls button (white, YouTube style).
+  const LAUNCH_ICON =
+    '<svg viewBox="0 0 36 36" height="100%" width="100%" fill="#fff">' +
+    '<rect x="6" y="10" width="24" height="16" rx="3" fill="none" stroke="#fff" stroke-width="2"/>' +
+    '<rect x="9.5" y="14" width="11" height="2.4"/>' +
+    '<rect x="9.5" y="19" width="17" height="2.4"/></svg>';
 
   let state = { ...DEFAULTS };
   let enLines = [];
@@ -31,8 +39,7 @@
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
     state.reader = false; // never start a page already in reader mode
-    document.documentElement.classList.remove('ytds-reader', 'ytds-fs');
-    applyNativeHide();
+    document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
     syncUi();
   });
@@ -280,10 +287,11 @@
     }
   });
 
-  // ---------- render loop ----------
+  // ---------- render loop (only while reading) ----------
   function loop() {
     rafId = requestAnimationFrame(loop);
-    if (state.reader) updateControls();
+    if (!state.reader) return;
+    updateControls();
     if (!video || (!enLines.length && !uaLines.length)) return;
     const t = video.currentTime;
     const en = pickLine(enLines, t);
@@ -299,12 +307,6 @@
     elRoll.textContent = '';
     if (state.showEn) appendLang(enLines, en, 'ytds-en');
     if (state.showUa) appendLang(uaLines, ua, 'ytds-ua');
-    measureDock();
-  }
-
-  function measureDock() {
-    if (!panel || !document.documentElement.classList.contains('ytds-fs')) return;
-    document.documentElement.style.setProperty('--dock-h', panel.offsetHeight + 'px');
   }
 
   function appendLang(lines, sel, cls) {
@@ -326,7 +328,7 @@
 
   const refresh = () => { lastSig = null; };
 
-  // ---------- playback controls (reader mode) ----------
+  // ---------- playback controls ----------
   const fmtTime = (s) => {
     s = Math.max(0, Math.floor(s || 0));
     const m = Math.floor(s / 60), ss = String(s % 60).padStart(2, '0');
@@ -345,11 +347,9 @@
     if (elFill) elFill.style.width = pct + '%';
   }
 
-  // ---------- UI ----------
+  // ---------- panel (built once, shown only in reader) ----------
   function ensurePanel() {
-    if (panel && document.body.contains(panel)) return true;
-    const anchor = document.querySelector('#below') || document.querySelector('#secondary');
-    if (!anchor) return false;
+    if (panel) return true;
 
     panel = document.createElement('div');
     panel.className = 'ytds-panel ytds-theme-' + state.theme;
@@ -359,15 +359,6 @@
 
     const btnEn = mkToggle('EN', 'showEn');
     const btnUa = mkToggle('UA', 'showUa');
-    const btnHide = mkToggle('Сховати субтитри YouTube', 'hideNative', applyNativeHide);
-
-    const btnLog = document.createElement('button');
-    btnLog.className = 'ytds-btn';
-    btnLog.textContent = 'Лог';
-    btnLog.addEventListener('click', () => {
-      elLog.style.display = elLog.style.display === 'none' ? '' : 'none';
-      btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
-    });
 
     const mkBtn = (label, title, fn, cls) => {
       const b = document.createElement('button');
@@ -378,11 +369,18 @@
     };
     const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1), 'ytds-step');
     const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1), 'ytds-step');
-    const btnReader = mkBtn('⤢ Читання', 'Режим читання на весь екран (Esc — вийти)', toggleReader, 'ytds-reader-btn');
+
+    const btnLog = document.createElement('button');
+    btnLog.className = 'ytds-btn';
+    btnLog.textContent = 'Лог';
+    btnLog.addEventListener('click', () => {
+      elLog.style.display = elLog.style.display === 'none' ? '' : 'none';
+      btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
+    });
 
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
-    themeSel.title = 'Тема панелі';
+    themeSel.title = 'Тема';
     for (const [code, label] of THEMES) {
       const o = document.createElement('option');
       o.value = code; o.textContent = label;
@@ -402,7 +400,7 @@
     }
     langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
 
-    bar.append(btnEn, btnUa, btnHide, btnLog, fontMinus, fontPlus, btnReader, themeSel, langSel);
+    bar.append(btnEn, btnUa, fontMinus, fontPlus, btnLog, themeSel, langSel);
 
     elRoll = document.createElement('div');
     elRoll.className = 'ytds-roll';
@@ -412,16 +410,14 @@
     elLog.className = 'ytds-log';
     elLog.style.display = 'none';
 
-    // Reader-only: playback controls wired straight to the <video> element.
     elControls = buildControls();
     elClose = document.createElement('button');
     elClose.className = 'ytds-close';
     elClose.textContent = '✕';
-    elClose.title = 'Вийти з режиму читання (Esc)';
+    elClose.title = 'Завершити навчання (Esc)';
     elClose.addEventListener('click', exitReader);
 
     panel.append(elClose, bar, elRoll, elStatus, elControls, elLog);
-    anchor.prepend(panel);
     syncUi();
     return true;
   }
@@ -480,8 +476,6 @@
     panel.querySelectorAll('.ytds-btn').forEach((b) => {
       if (b.dataset.key) b.classList.toggle('ytds-on', !!state[b.dataset.key]);
     });
-    const rb = panel.querySelector('.ytds-reader-btn');
-    if (rb) rb.classList.toggle('ytds-on', !!state.reader);
     if (langSel) langSel.value = state.targetLang;
     updateLabels();
     applyLayout();
@@ -494,10 +488,6 @@
     const bTr = panel.querySelector('[data-key="showUa"]');
     if (bSrc) bSrc.textContent = (srcLang || 'en').toUpperCase();
     if (bTr) bTr.textContent = state.targetLang.toUpperCase();
-  }
-
-  function applyNativeHide() {
-    document.documentElement.classList.toggle('ytds-hide-native', !!state.hideNative);
   }
 
   function applyTheme() {
@@ -513,12 +503,10 @@
     saveState(); applyLayout(); refresh();
   }
 
-  // ---------- reader mode ----------
-  function toggleReader() { state.reader ? exitReader() : enterReader(); }
-
+  // ---------- reader (study) mode ----------
   function enterReader() {
+    ensurePanel();
     state.reader = true; saveState();
-    document.documentElement.classList.remove('ytds-fs');
     document.body.appendChild(panel);
     document.documentElement.classList.add('ytds-reader');
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
@@ -530,8 +518,7 @@
     state.reader = false; saveState();
     document.documentElement.classList.remove('ytds-reader');
     if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
-    const anchor = document.querySelector('#below') || document.querySelector('#secondary');
-    if (anchor && panel && panel.parentElement !== anchor) anchor.prepend(panel);
+    if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
     syncUi();
   }
 
@@ -539,33 +526,30 @@
     if (e.key === 'Escape' && state.reader) { e.stopPropagation(); exitReader(); }
   }, true);
 
-  // ---------- native (video) fullscreen dock ----------
-  function onFullscreen() {
-    const fsEl = document.fullscreenElement;
-    if (state.reader) {
-      if (!fsEl) exitReader(); // user left our reader fullscreen via Esc/F
-      return;
-    }
-    const player = document.getElementById('movie_player');
-    if (fsEl === player && panel) {
-      document.documentElement.classList.add('ytds-fs');
-      player.appendChild(panel);
-    } else {
-      document.documentElement.classList.remove('ytds-fs');
-      const anchor = document.querySelector('#below') || document.querySelector('#secondary');
-      if (anchor && panel) anchor.prepend(panel);
-    }
-    setTimeout(() => { window.dispatchEvent(new Event('resize')); measureDock(); }, 60);
+  document.addEventListener('fullscreenchange', () => {
+    if (state.reader && !document.fullscreenElement) exitReader();
+  });
+
+  // ---------- player-controls launch button ----------
+  function ensureLaunchButton() {
+    const rc = document.querySelector('.ytp-right-controls');
+    if (!rc || rc.querySelector('.ytds-launch')) return;
+    const btn = document.createElement('button');
+    btn.className = 'ytp-button ytds-launch';
+    btn.title = 'Навчання: двомовні субтитри (English + переклад)';
+    btn.innerHTML = LAUNCH_ICON;
+    btn.addEventListener('click', enterReader);
+    rc.insertBefore(btn, rc.firstChild);
   }
-  document.addEventListener('fullscreenchange', onFullscreen);
 
   // ---------- lifecycle ----------
   function tick() {
     if (location.pathname !== '/watch') return;
     video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-    if (!state.reader) ensurePanel();
+    ensurePanel();
+    ensureLaunchButton();
     const id = new URLSearchParams(location.search).get('v');
-    if (id && id !== currentVideoId && panel) {
+    if (id && id !== currentVideoId) {
       currentVideoId = id;
       loadCaptions();
     }
