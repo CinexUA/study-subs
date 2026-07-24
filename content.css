@@ -167,40 +167,21 @@ html.ytds-hide-native .ytp-caption-window-container {
   display: none !important;
 }
 
-/* ---------- Reader mode: full-viewport overlay, subtitles centered ---------- */
+/* ---------- Reader mode: full-screen overlay, subtitles centered ---------- */
 html.ytds-reader .ytds-panel {
   position: fixed;
   inset: 0;
+  width: 100vw;
+  height: 100vh;
   z-index: 2147483646;
   margin: 0;
   border: 0;
   border-radius: 0;
-  padding: 64px 6vw 24px;
+  padding: 16px 6vw 12px;
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
 }
-
-/* Always-reachable exit button, above everything (incl. the YouTube masthead) */
-.ytds-close {
-  display: none;
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  z-index: 2147483647;
-  width: 44px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  line-height: 1;
-  color: #fff;
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  cursor: pointer;
-}
-.ytds-close:hover { background: rgba(0, 0, 0, 0.85); }
 html.ytds-reader .ytds-roll {
   flex: 1 1 auto;
   justify-content: center;
@@ -209,6 +190,67 @@ html.ytds-reader .ytds-roll {
 html.ytds-reader .ytds-status { display: none; }
 html.ytds-reader .ytds-en { font-size: calc(34px * var(--font-scale, 1)); }
 html.ytds-reader .ytds-ua { font-size: calc(28px * var(--font-scale, 1)); }
+
+/* Exit button (inside the panel, so it shows even in element fullscreen) */
+.ytds-close { display: none; }
+html.ytds-reader .ytds-close {
+  display: flex;
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 5;
+  width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--btn-fg);
+  background: var(--btn-bg);
+  border: 1px solid var(--btn-border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+html.ytds-reader .ytds-close:hover { background: var(--btn-hover); }
+
+/* Playback controls (reader only) */
+.ytds-controls { display: none; }
+html.ytds-reader .ytds-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px 4px;
+}
+.ytds-cbtn {
+  cursor: pointer;
+  border: 1px solid var(--btn-border);
+  background: var(--btn-bg);
+  color: var(--btn-fg);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 15px;
+  line-height: 1;
+}
+.ytds-cbtn:hover { background: var(--btn-hover); }
+.ytds-time {
+  color: var(--status);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ytds-progress {
+  flex: 1 1 auto;
+  height: 8px;
+  background: var(--btn-border);
+  border-radius: 999px;
+  cursor: pointer;
+  overflow: hidden;
+}
+.ytds-progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--btn-on-bg);
+}
 
 /* ---------- Fullscreen: dock panel at the bottom, push the video up ---------- */
 html.ytds-fs .ytds-panel {

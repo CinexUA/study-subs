@@ -11,30 +11,30 @@
     ['it', 'Italiano'], ['ru', 'Русский']
   ];
   const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
-  const LEAD = 0.12; // reveal a word this many seconds around its timestamp
+  const LEAD = 0.12;
 
   let state = { ...DEFAULTS };
-  let enLines = [];          // [{ start, end, units:[{t,text}], full }]
+  let enLines = [];
   let uaLines = [];
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
-  let lastSig = null;
+  let lastSig = null, lastCtl = '';
   let currentVideoId = null;
   let awaitingCapture = false;
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elRoll, elStatus, elLog, langSel, elClose;
+  let panel, elRoll, elStatus, elLog, langSel, elClose, elControls, elPlay, elTime, elFill;
   let rafId = null;
 
   // ---------- state ----------
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
     state.reader = false; // never start a page already in reader mode
+    document.documentElement.classList.remove('ytds-reader', 'ytds-fs');
     applyNativeHide();
     ensurePanel();
     syncUi();
-    applyReader();
   });
   const saveState = () => chrome.storage.local.set({ ytds: state });
 
@@ -51,6 +51,7 @@
 
   const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
   const clearDisplay = () => { if (elRoll) elRoll.textContent = ''; lastSig = null; };
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   // ---------- MAIN-world bridge ----------
   function requestTracks() {
@@ -82,7 +83,6 @@
     } catch (_) { return url; }
   }
 
-  // Returns [{ t, text }] — one entry per word (json3) or per chunk (xml).
   async function fetchUnits(baseUrl, tlang) {
     const tl = tlang ? '&tlang=' + encodeURIComponent(tlang) : '';
     for (const fmt of ['&fmt=json3', '']) {
@@ -110,7 +110,7 @@
       const base = ev.tStartMs || 0;
       for (const s of ev.segs) {
         const txt = s.utf8;
-        if (txt == null || !txt.replace(/\s/g, '')) continue; // skip empty / newline
+        if (txt == null || !txt.replace(/\s/g, '')) continue;
         units.push({ t: (base + (s.tOffsetMs || 0)) / 1000, text: txt });
       }
     }
@@ -130,8 +130,6 @@
     return make(nodes, 't', 1000);
   }
 
-  // Join word units, restoring spaces (json3 often drops the space segments)
-  // while keeping punctuation attached to the preceding word.
   function joinUnits(units) {
     let out = '';
     for (const u of units) {
@@ -142,8 +140,6 @@
     return out.replace(/\s+/g, ' ').trim();
   }
 
-  // Group words into caption-sized lines; break on sentence end or width cap,
-  // but keep the per-word timing so we can reveal them progressively.
   function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
     const lines = [];
     let cur = null;
@@ -193,7 +189,6 @@
     || tracks.find((t) => t.lang && t.lang.startsWith('en'))
     || tracks[0];
 
-  // Build EN + UA lines from one valid base URL. Returns true on success.
   async function buildFromBase(base, body, capTlang) {
     let enUnits = [];
     try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
@@ -285,9 +280,10 @@
     }
   });
 
-  // ---------- word-by-word render ----------
+  // ---------- render loop ----------
   function loop() {
     rafId = requestAnimationFrame(loop);
+    if (state.reader) updateControls();
     if (!video || (!enLines.length && !uaLines.length)) return;
     const t = video.currentTime;
     const en = pickLine(enLines, t);
@@ -306,8 +302,6 @@
     measureDock();
   }
 
-  // In fullscreen the video is shrunk by the panel's real height, so the dock
-  // hugs its content (no empty space when a row is toggled off).
   function measureDock() {
     if (!panel || !document.documentElement.classList.contains('ytds-fs')) return;
     document.documentElement.style.setProperty('--dock-h', panel.offsetHeight + 'px');
@@ -315,10 +309,9 @@
 
   function appendLang(lines, sel, cls) {
     if (sel.idx < 0) return;
-    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false); // previous line, dimmed
+    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false);
     const line = lines[sel.idx];
-    const revealed = joinUnits(line.units.slice(0, sel.n));
-    addLine(revealed, cls, true); // current line, building word by word
+    addLine(joinUnits(line.units.slice(0, sel.n)), cls, true);
   }
 
   function addLine(text, cls, active) {
@@ -332,6 +325,25 @@
   }
 
   const refresh = () => { lastSig = null; };
+
+  // ---------- playback controls (reader mode) ----------
+  const fmtTime = (s) => {
+    s = Math.max(0, Math.floor(s || 0));
+    const m = Math.floor(s / 60), ss = String(s % 60).padStart(2, '0');
+    return `${m}:${ss}`;
+  };
+
+  function updateControls() {
+    if (!elControls || !video) return;
+    const cur = video.currentTime || 0, dur = video.duration || 0;
+    const pct = dur ? (cur / dur) * 100 : 0;
+    const sig = `${Math.floor(cur)}|${video.paused ? 0 : 1}|${Math.floor(pct)}`;
+    if (sig === lastCtl) return;
+    lastCtl = sig;
+    if (elPlay) elPlay.textContent = video.paused ? '▶' : '❚❚';
+    if (elTime) elTime.textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
+    if (elFill) elFill.style.width = pct + '%';
+  }
 
   // ---------- UI ----------
   function ensurePanel() {
@@ -357,17 +369,16 @@
       btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
     });
 
-    const mkBtn = (label, title, fn) => {
+    const mkBtn = (label, title, fn, cls) => {
       const b = document.createElement('button');
-      b.className = 'ytds-btn ytds-step';
+      b.className = 'ytds-btn' + (cls ? ' ' + cls : '');
       b.textContent = label; b.title = title;
       b.addEventListener('click', fn);
       return b;
     };
-    const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1));
-    const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1));
-    const btnReader = mkToggle('⤢ Читання', 'reader', applyReader);
-    btnReader.title = 'Режим читання на весь екран (Esc — вийти)';
+    const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1), 'ytds-step');
+    const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1), 'ytds-step');
+    const btnReader = mkBtn('⤢ Читання', 'Режим читання на весь екран (Esc — вийти)', toggleReader, 'ytds-reader-btn');
 
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
@@ -401,22 +412,52 @@
     elLog.className = 'ytds-log';
     elLog.style.display = 'none';
 
-    panel.append(bar, elRoll, elStatus, elLog);
+    // Reader-only: playback controls wired straight to the <video> element.
+    elControls = buildControls();
+    elClose = document.createElement('button');
+    elClose.className = 'ytds-close';
+    elClose.textContent = '✕';
+    elClose.title = 'Вийти з режиму читання (Esc)';
+    elClose.addEventListener('click', exitReader);
+
+    panel.append(elClose, bar, elRoll, elStatus, elControls, elLog);
     anchor.prepend(panel);
-
-    // Floating exit button for reader mode, on <body> so it is always reachable.
-    if (!elClose) {
-      elClose = document.createElement('button');
-      elClose.className = 'ytds-close';
-      elClose.textContent = '✕';
-      elClose.title = 'Вийти з режиму читання (Esc)';
-      elClose.style.display = 'none';
-      elClose.addEventListener('click', exitReader);
-      document.body.appendChild(elClose);
-    }
-
     syncUi();
     return true;
+  }
+
+  function buildControls() {
+    const wrap = document.createElement('div');
+    wrap.className = 'ytds-controls';
+
+    const seek = (d) => { if (video && video.duration) video.currentTime = clamp(video.currentTime + d, 0, video.duration); };
+    const mk = (label, title, fn) => {
+      const b = document.createElement('button');
+      b.className = 'ytds-cbtn'; b.textContent = label; b.title = title;
+      b.addEventListener('click', fn);
+      return b;
+    };
+    const back = mk('⏪', 'Назад 10 с', () => seek(-10));
+    elPlay = mk('▶', 'Пауза / відтворення', () => { if (!video) return; video.paused ? video.play() : video.pause(); });
+    const fwd = mk('⏩', 'Вперед 10 с', () => seek(10));
+
+    elTime = document.createElement('span');
+    elTime.className = 'ytds-time';
+    elTime.textContent = '0:00 / 0:00';
+
+    const track = document.createElement('div');
+    track.className = 'ytds-progress';
+    elFill = document.createElement('div');
+    elFill.className = 'ytds-progress-fill';
+    track.appendChild(elFill);
+    track.addEventListener('click', (e) => {
+      if (!video || !video.duration) return;
+      const r = track.getBoundingClientRect();
+      video.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * video.duration;
+    });
+
+    wrap.append(back, elPlay, fwd, elTime, track);
+    return wrap;
   }
 
   function mkToggle(label, key, extra) {
@@ -439,6 +480,8 @@
     panel.querySelectorAll('.ytds-btn').forEach((b) => {
       if (b.dataset.key) b.classList.toggle('ytds-on', !!state[b.dataset.key]);
     });
+    const rb = panel.querySelector('.ytds-reader-btn');
+    if (rb) rb.classList.toggle('ytds-on', !!state.reader);
     if (langSel) langSel.value = state.targetLang;
     updateLabels();
     applyLayout();
@@ -461,50 +504,50 @@
     if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
   }
 
-  // Reader mode: the panel becomes a full-viewport overlay (own overlay, not the
-  // browser fullscreen), subtitles centered and large. The video keeps playing
-  // its audio behind it. Exit with the button or Esc.
-  function applyReader() {
-    const on = !!state.reader;
-    document.documentElement.classList.toggle('ytds-reader', on);
-    if (elClose) elClose.style.display = on ? 'flex' : 'none';
-    if (!panel) return;
-    if (on) {
-      document.body.appendChild(panel);
-    } else {
-      const anchor = document.querySelector('#below') || document.querySelector('#secondary');
-      if (anchor) anchor.prepend(panel);
-    }
-    refresh();
+  function applyLayout() {
+    document.documentElement.style.setProperty('--font-scale', state.fontScale || 1);
+  }
+
+  function changeFont(delta) {
+    state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.6);
+    saveState(); applyLayout(); refresh();
+  }
+
+  // ---------- reader mode ----------
+  function toggleReader() { state.reader ? exitReader() : enterReader(); }
+
+  function enterReader() {
+    state.reader = true; saveState();
+    document.documentElement.classList.remove('ytds-fs');
+    document.body.appendChild(panel);
+    document.documentElement.classList.add('ytds-reader');
+    if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
+    syncUi(); refresh();
   }
 
   function exitReader() {
-    if (!state.reader) return;
-    state.reader = false; saveState(); applyReader(); syncUi();
+    if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
+    state.reader = false; saveState();
+    document.documentElement.classList.remove('ytds-reader');
+    if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
+    const anchor = document.querySelector('#below') || document.querySelector('#secondary');
+    if (anchor && panel && panel.parentElement !== anchor) anchor.prepend(panel);
+    syncUi();
   }
 
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && state.reader) { e.stopPropagation(); exitReader(); }
   }, true);
 
-  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-
-  function applyLayout() {
-    // Font scale drives text size; the window height follows the content.
-    // Set on <html> so the fullscreen video-shrink rule can read it too.
-    document.documentElement.style.setProperty('--font-scale', state.fontScale || 1);
-  }
-
-  function changeFont(delta) {
-    state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.2);
-    saveState(); applyLayout(); refresh(); // re-render to remeasure the dock
-  }
-
-  // ---------- fullscreen ----------
+  // ---------- native (video) fullscreen dock ----------
   function onFullscreen() {
-    const fs = document.fullscreenElement;
+    const fsEl = document.fullscreenElement;
+    if (state.reader) {
+      if (!fsEl) exitReader(); // user left our reader fullscreen via Esc/F
+      return;
+    }
     const player = document.getElementById('movie_player');
-    if (fs && player && panel) {
+    if (fsEl === player && panel) {
       document.documentElement.classList.add('ytds-fs');
       player.appendChild(panel);
     } else {
@@ -512,7 +555,6 @@
       const anchor = document.querySelector('#below') || document.querySelector('#secondary');
       if (anchor && panel) anchor.prepend(panel);
     }
-    refresh();
     setTimeout(() => { window.dispatchEvent(new Event('resize')); measureDock(); }, 60);
   }
   document.addEventListener('fullscreenchange', onFullscreen);
@@ -521,7 +563,7 @@
   function tick() {
     if (location.pathname !== '/watch') return;
     video = document.querySelector('video.html5-main-video') || document.querySelector('video');
-    ensurePanel();
+    if (!state.reader) ensurePanel();
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId && panel) {
       currentVideoId = id;
