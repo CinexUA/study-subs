@@ -89,7 +89,7 @@
       const body = (await res.text()).trim();
       if (!body) continue;
       const segs = parseAny(body);
-      if (segs.length) return segs;
+      if (segs.length) return groupSegs(segs);
     }
     return [];
   }
@@ -130,6 +130,30 @@
     return push(nodes, 't', 'd', 1000);
   }
 
+  // Merge YouTube's short time-chunks into whole sentences so the text is not
+  // torn mid-phrase. Flushes on sentence-ending punctuation, or on a length /
+  // duration cap (fallback for auto-captions that have no punctuation).
+  function groupSegs(segs, maxChars = 160, maxDur = 7) {
+    const out = [];
+    let buf = '', start = null, end = null;
+    const flush = () => {
+      const text = buf.trim();
+      if (text) out.push({ start, end, text });
+      buf = ''; start = null;
+    };
+    for (const s of segs) {
+      const t = (s.text || '').trim();
+      if (!t) continue;
+      if (start === null) start = s.start;
+      end = s.end;
+      buf += (buf ? ' ' : '') + t;
+      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf);
+      if (endsSentence || buf.length >= maxChars || (end - start) >= maxDur) flush();
+    }
+    flush();
+    return out;
+  }
+
   function findSeg(segs, t) {
     let lo = 0, hi = segs.length - 1, ans = -1;
     while (lo <= hi) {
@@ -159,7 +183,7 @@
   async function buildFromBase(base, body, capTlang) {
     let en = [];
     try { en = await fetchSegs(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
-    if (!en.length && !capTlang && body) en = parseAny(body);
+    if (!en.length && !capTlang && body) en = groupSegs(parseAny(body));
     if (!en.length) return false;
 
     enSegs = en;
@@ -170,7 +194,7 @@
     if (state.targetLang === srcLang) {
       uaSegs = enSegs;
     } else if (capTlang === state.targetLang && body) {
-      uaSegs = parseAny(body); // captured body already is the target translation
+      uaSegs = groupSegs(parseAny(body)); // captured body already is the target translation
       if (!uaSegs.length) { try { uaSegs = await fetchSegs(base, state.targetLang); } catch (_) {} }
     } else {
       try { uaSegs = await fetchSegs(base, state.targetLang); } catch (_) { uaSegs = []; }
