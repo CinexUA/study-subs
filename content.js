@@ -40,6 +40,9 @@
   let uaSentences = [];  // translation sentences, index-aligned to `sentences`
   let sentIdx = 0;
   let stopAt = null;
+  let stopTimer = null;      // precise stop scheduled for the exact remaining time
+  let suppressSeek = false;  // our own currentTime writes must not look like user seeks
+  let hookedVideo = null;    // the <video> we attached play/seek/rate listeners to
 
   // ---------- state ----------
   chrome.storage.local.get('ytds', (r) => {
@@ -121,10 +124,15 @@
     for (const ev of (data.events || [])) {
       if (!ev.segs) continue;
       const base = ev.tStartMs || 0;
-      for (const s of ev.segs) {
-        const txt = s.utf8;
-        if (txt == null || !txt.replace(/\s/g, '')) continue;
-        units.push({ t: (base + (s.tOffsetMs || 0)) / 1000, text: txt });
+      // dDurationMs = display end of the event; for the last word of an event
+      // it is the only end estimate we have (ASR rolling captions overinflate
+      // it, so buildSentences additionally caps word length).
+      const evEnd = ev.dDurationMs ? (base + ev.dDurationMs) / 1000 : null;
+      const segs = ev.segs.filter((s) => s.utf8 != null && s.utf8.replace(/\s/g, ''));
+      for (let i = 0; i < segs.length; i++) {
+        const t = (base + (segs[i].tOffsetMs || 0)) / 1000;
+        const nextT = i + 1 < segs.length ? (base + (segs[i + 1].tOffsetMs || 0)) / 1000 : evEnd;
+        units.push({ t, end: nextT != null && nextT > t ? nextT : undefined, text: segs[i].utf8 });
       }
     }
     return units;
@@ -132,15 +140,16 @@
 
   function parseXmlUnits(xml) {
     const doc = new DOMParser().parseFromString(xml, 'text/xml');
-    const make = (nodes, tAttr, scale) => nodes.map((n, i) => {
+    const make = (nodes, tAttr, dAttr, scale) => nodes.map((n, i) => {
       const t = parseFloat(n.getAttribute(tAttr) || '0') / scale;
+      const d = parseFloat(n.getAttribute(dAttr) || '0') / scale;
       const text = (n.textContent || '').replace(/\s+/g, ' ').trim();
-      return text ? { t, text: (i > 0 ? ' ' : '') + text } : null;
+      return text ? { t, end: d > 0 ? t + d : undefined, text: (i > 0 ? ' ' : '') + text } : null;
     }).filter(Boolean);
     let nodes = [...doc.querySelectorAll('text')];
-    if (nodes.length) return make(nodes, 'start', 1);
+    if (nodes.length) return make(nodes, 'start', 'dur', 1);
     nodes = [...doc.querySelectorAll('p')];
-    return make(nodes, 't', 1000);
+    return make(nodes, 't', 'd', 1000);
   }
 
   function joinUnits(units) {
@@ -151,6 +160,55 @@
       out += txt;
     }
     return out.replace(/\s+/g, ' ').trim();
+  }
+
+  // True sentence end: terminal punctuation that is not an abbreviation.
+  // A single letter ("U.S.", "п.") or a known title before the period does
+  // not close a sentence — splitting there breaks both the stop point and
+  // the UA alignment windows.
+  const ABBR_RE = /(?:^|[\s.(\[«"'“‘])(?:[a-zа-яіїєґ]|mr|mrs|ms|dr|st|jr|sr|prof|gen|rep|sen|vs|etc|inc|approx)\.$/i;
+  function endsSentence(text) {
+    const t = String(text).trimEnd().replace(/["'”’»)\]]+$/, '');
+    if (!/[.!?…]$/.test(t)) return false;
+    return !(t.endsWith('.') && ABBR_RE.test(t));
+  }
+
+  // Coarse tracks (auto-translate often returns one unit per caption line)
+  // can hold several sentences in one unit, and then a whole line lands in a
+  // single alignment bucket together with a neighbouring sentence's tail.
+  // Split such units at sentence punctuation; timestamps are interpolated by
+  // character position across the unit's time span. Word-level units pass
+  // through untouched.
+  function splitUnitsByPunct(units) {
+    const out = [];
+    const re = /[.!?…]["'”’»)\]]*\s+/g;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      const text = u.text;
+      const cuts = [];
+      let m;
+      re.lastIndex = 0;
+      while ((m = re.exec(text))) {
+        if (endsSentence(text.slice(0, m.index + 1))) cuts.push(m.index + m[0].length);
+      }
+      if (!cuts.length) { out.push(u); continue; }
+      const endT = u.end != null ? u.end : (i + 1 < units.length ? units[i + 1].t : u.t + 2);
+      const span = Math.max(0, endT - u.t);
+      let prev = 0;
+      for (const c of [...cuts, text.length]) {
+        if (c <= prev) continue;
+        const piece = text.slice(prev, c);
+        if (piece.trim()) {
+          out.push({
+            t: u.t + span * (prev / text.length),
+            end: u.t + span * (c / text.length),
+            text: piece
+          });
+        }
+        prev = c;
+      }
+    }
+    return out;
   }
 
   function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
@@ -168,8 +226,8 @@
       if (!cur) cur = { start: u.t, units: [] };
       cur.units.push(u);
       const buf = joinUnits(cur.units);
-      const endsSentence = /[.!?…]["'”’)\]]*$/.test(buf);
-      if ((endsSentence && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
+      const endsSent = endsSentence(buf);
+      if ((endsSent && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
     }
     flush();
     return lines;
@@ -189,31 +247,78 @@
     return { idx, n: Math.max(1, n) };
   }
 
-  // Split word units into sentences (period/!/?/… ends one). Each sentence keeps
-  // its own units (for word-by-word reveal) and an end time = just before the
-  // next word's onset, so playback stops in the pause.
+  // Split word units into sentences (period/!/?/… ends one; a long silence
+  // also breaks — ASR tracks may lack punctuation entirely). Each sentence
+  // keeps its units (word-by-word reveal) and an end = just AFTER the last
+  // word is spoken (unit `end` from dDurationMs/dur), clamped to safely
+  // before the next word's onset. Stopping right after speech — instead of
+  // riding the silence to the brink of the next word — is what keeps the
+  // next sentence's audio from bleeding in even when timestamps are off.
   function buildSentences(units) {
     const out = [];
     let cur = null, buf = '';
+    // When the last word is spoken to the end: parser-provided end if any,
+    // clamped by the next word's onset and by a max plausible word length.
+    const spokenEnd = (u, nextT) => {
+      let e = u.end != null ? u.end : u.t + 0.45;
+      if (nextT != null && nextT > u.t) e = Math.min(e, nextT);
+      return Math.min(e, u.t + 0.7);
+    };
+    const close = (i) => {
+      const u = units[i], next = units[i + 1];
+      const se = spokenEnd(u, next ? next.t : null);
+      cur.end = next
+        ? Math.max(Math.min(se + 0.2, next.t - 0.08), Math.min(u.t + 0.15, next.t - 0.03))
+        : (video && video.duration ? video.duration : se + 0.6);
+      out.push(cur);
+      cur = null;
+    };
     for (let i = 0; i < units.length; i++) {
-      const u = units[i];
+      const u = units[i], next = units[i + 1];
       if (!cur) { cur = { start: u.t, units: [] }; buf = ''; }
       cur.units.push(u);
       buf += u.text;
-      if (/[.!?…]["'”’)\]]*\s*$/.test(buf)) {
-        cur.end = (i + 1 < units.length)
-          // Stop in the pause BEFORE the next word, so its onset is neither
-          // heard nor revealed — but keep at least a little of the last word.
-          ? Math.max(u.t + 0.12, units[i + 1].t - 0.2)
-          : (video && video.duration ? video.duration : u.t + 3);
-        out.push(cur);
-        cur = null;
-      }
+      const longGap = next && (next.t - spokenEnd(u, next.t)) >= 1.4;
+      if (endsSentence(buf) || longGap) close(i);
     }
-    if (cur) {
-      const last = cur.units[cur.units.length - 1];
-      cur.end = (video && video.duration ? video.duration : last.t + 3);
-      out.push(cur);
+    if (cur) close(units.length - 1);
+    return out;
+  }
+
+  // Align the translation to the EN sentences by TIME, not by its own
+  // punctuation. Auto-translate re-places periods (one EN sentence can become
+  // two UA ones, or vice-versa), so segmenting UA independently drifts out of
+  // index-sync with EN. Instead: every UA word keeps its own timestamp from the
+  // same audio, so we bucket each UA word into the EN sentence whose time window
+  // it falls in. Result always has exactly one UA bucket per EN sentence.
+  function alignUaToEn(uaUnits, enSents) {
+    const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
+    if (!out.length) return out;
+    let si = 0;
+    for (const u of uaUnits) {
+      while (si + 1 < enSents.length && enSents[si + 1].start <= u.t + 0.01) si++;
+      out[si].units.push(u);
+    }
+    // Time buckets can catch the next sentence's leading word(s): an auto-
+    // translated word may be timed a hair before the next EN sentence starts.
+    // Punctuation is the true end, so move anything trailing after a bucket's
+    // last sentence-ending mark into the next bucket — where it belongs.
+    for (let i = 0; i < out.length - 1; i++) {
+      const u = out[i].units;
+      let cut = -1;
+      for (let k = 0; k < u.length; k++) {
+        if (endsSentence(u[k].text)) cut = k;
+      }
+      if (cut >= 0) {
+        if (cut < u.length - 1) out[i + 1].units.unshift(...u.splice(cut + 1));
+      } else {
+        // No punctuation to go by (auto-translate dropped the period): fall
+        // back to the EN sentence's time window — words that start after its
+        // speech has ended belong to the next sentence.
+        let k = u.length;
+        while (k > 1 && u[k - 1].t > out[i].end + 0.05) k--;
+        if (k < u.length) out[i + 1].units.unshift(...u.splice(k));
+      }
     }
     return out;
   }
@@ -223,15 +328,58 @@
     return Math.max(0, sentences.length - 1);
   }
 
-  // Seek to a sentence's start and play until its end (then loop() pauses us).
+  // Seek to just before a sentence's first word and play until its end.
   function playSentence(i) {
     if (!video || !sentences.length) return;
     sentIdx = clamp(i, 0, sentences.length - 1);
     const s = sentences[sentIdx];
     stopAt = s.end;
-    try { video.currentTime = s.start; } catch (_) {}
+    const prevEnd = sentIdx > 0 ? sentences[sentIdx - 1].end : 0;
+    // A touch early, so the first word's attack isn't clipped by the seek.
+    const from = Math.min(Math.max(s.start - 0.15, prevEnd), s.start);
+    try { video.currentTime = from; } catch (_) {}
     video.play().catch(() => {});
+    armStop();
     lastSig = null; lastCtl = '';
+  }
+
+  // Precise stop: a timer scheduled for the exact remaining time. rAF alone
+  // overshoots by a frame (16–33+ ms, worse at 2×) and freezes in background
+  // tabs; the rAF check in loop() stays only as a backup.
+  function armStop() {
+    clearTimeout(stopTimer); stopTimer = null;
+    if (stopAt == null || !video || video.paused) return;
+    const ms = Math.max(0, (stopAt - video.currentTime) / (video.playbackRate || 1)) * 1000;
+    stopTimer = setTimeout(hitStop, ms);
+  }
+  function hitStop() {
+    clearTimeout(stopTimer); stopTimer = null;
+    if (stopAt == null || !video || video.paused) return;
+    if (video.currentTime < stopAt - 0.005) { armStop(); return; } // fired early (seek lag / buffering)
+    video.pause();
+    const over = video.currentTime - stopAt;
+    if (over > 0.005 && over < 0.8) {
+      suppressSeek = true; // our own correction — not a user seek
+      try { video.currentTime = stopAt; } catch (_) { suppressSeek = false; }
+    }
+    stopAt = null;
+    lastCtl = '';
+  }
+
+  // After any user seek or a resume outside our controls, the text must show
+  // the sentence the audio is actually in — otherwise audio walks away while
+  // the display stays frozen on a stale sentence.
+  function resyncStudy() {
+    if (!state.reader || !state.study || !sentences.length || !video) return;
+    const i = findSentenceAt(video.currentTime || 0);
+    if (i !== sentIdx) { sentIdx = i; lastSig = null; }
+    stopAt = sentences[sentIdx].end;
+    armStop();
+  }
+
+  function onSeeked() {
+    if (suppressSeek) { suppressSeek = false; return; }
+    resyncStudy();
   }
 
   // Begin shadowing at whatever sentence the playhead is currently in.
@@ -245,11 +393,12 @@
     document.documentElement.classList.toggle('ytds-study', !!on);
     if (btnStudy) btnStudy.classList.toggle('ytds-on', !!on);
     if (on) armStudy();
-    else stopAt = null; // free play again
+    else { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
   }
 
   function applySpeed() {
     if (video) { try { video.playbackRate = state.speed || 1; } catch (_) {} }
+    armStop(); // the stop timer depends on the playback rate
   }
 
   function updateStatus() {
@@ -270,6 +419,7 @@
     try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
     if (!enUnits.length && !capTlang && body) enUnits = parseUnits(body);
     if (!enUnits.length) return false;
+    enUnits = splitUnitsByPunct(enUnits);
 
     if (!srcLang) {
       try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
@@ -285,11 +435,12 @@
     } else {
       try { uaUnits = await fetchUnits(base, state.targetLang); } catch (_) { uaUnits = []; }
     }
+    if (!sameLang) uaUnits = splitUnitsByPunct(uaUnits);
 
     enLines = groupUnitsToLines(enUnits);
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
     sentences = buildSentences(enUnits);
-    uaSentences = sameLang ? sentences : buildSentences(uaUnits);
+    uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
     sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null;
@@ -302,6 +453,7 @@
   async function loadCaptions() {
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
+    clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
     clearTimeout(captureTimer);
     clearDisplay();
@@ -366,17 +518,16 @@
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
-    // Shadowing: stop the video right at the end of the current sentence.
-    if (state.study && stopAt != null && video && !video.paused && video.currentTime >= stopAt - 0.03) {
-      video.pause();
-      stopAt = null;
-    }
+    // Shadowing: the precise stop timer does the real work; this is a backup.
+    if (state.study && stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
     if (!video || (!enLines.length && !uaLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
 
     // Study mode: reveal only the current sentence, EN and UA index-aligned,
     // so the next sentence's words can never bleed across the two tracks.
     if (state.study && sentences.length) {
+      // Playing with no stop armed = resumed outside our controls — follow.
+      if (!video.paused && stopAt == null) resyncStudy();
       const enS = sentences[sentIdx];
       const enN = revealCount(enS, t);
       const uaN = uaRevealCount(enS, uaSentences[sentIdx], t);
@@ -586,7 +737,14 @@
       return b;
     };
     const back = mk('⏪', 'Назад 10 с', () => seek(-10));
-    elPlay = mk('▶', 'Пауза / відтворення', () => { if (!video) return; video.paused ? video.play() : video.pause(); });
+    elPlay = mk('▶', 'Пауза / відтворення', () => {
+      if (!video) return;
+      if (!video.paused) { video.pause(); return; }
+      // In study mode ▶ after the auto-stop means "next sentence" (skips the
+      // silence); a manual mid-sentence pause (stop still armed) just resumes.
+      if (state.study && state.reader && sentences.length && stopAt == null) playSentence(sentIdx + 1);
+      else video.play();
+    });
     const fwd = mk('⏩', 'Вперед 10 с', () => seek(10));
 
     elSpeed = document.createElement('select');
@@ -702,6 +860,7 @@
     if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
     state.reader = false; saveState();
     stopAt = null; // let the video play normally again outside study mode
+    clearTimeout(stopTimer); stopTimer = null;
     document.documentElement.classList.remove('ytds-reader');
     document.documentElement.classList.remove('ytds-study');
     if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
@@ -733,6 +892,12 @@
   function tick() {
     if (location.pathname !== '/watch') return;
     video = document.querySelector('video.html5-main-video') || document.querySelector('video');
+    if (video && video !== hookedVideo) {
+      hookedVideo = video;
+      video.addEventListener('play', armStop);
+      video.addEventListener('ratechange', armStop);
+      video.addEventListener('seeked', onSeeked);
+    }
     ensurePanel();
     ensureLaunchButton();
     const id = new URLSearchParams(location.search).get('v');
