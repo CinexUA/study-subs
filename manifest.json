@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "YT Dual Subs — English + Ukrainian",
   "version": "0.1.0",
-  "description": "Показує субтитри під відео YouTube: оригінал (EN) та переклад (UA), не перекриваючи зображення.",
+  "description": "Shows subtitles below the YouTube video: original (EN) and translation (UA), without covering the picture.",
   "permissions": ["storage"],
   "host_permissions": ["https://www.youtube.com/*"],
   "content_scripts": [

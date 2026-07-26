@@ -1,106 +1,111 @@
 # YT Dual Subs — English + Ukrainian
 
-Розширення для Google Chrome, яке виносить субтитри YouTube **під відео**:
-верхній ряд — оригінал (EN), нижній — переклад (UA). Зображення не перекривається,
-рідні субтитри YouTube можна сховати. Мета — вивчення англійської: бачиш оригінал
-і одразу переклад незнайомих слів, не втрачаючи головний текст на екрані.
+A Google Chrome extension that pulls YouTube subtitles out **below the video**:
+top row — original (EN), bottom row — translation (UA). The picture is never
+covered, and YouTube's native captions can be hidden. The goal is learning
+English: you see the original and instantly the translation of unfamiliar
+words, without losing the main text off-screen.
 
-## Встановлення в режимі розробника (dev / unpacked)
+## Installing in developer mode (dev / unpacked)
 
-Розширення не потрібно збирати — це звичайні файли, Chrome вантажить папку напряму.
+The extension doesn't need building — it's plain files, Chrome loads the
+folder directly.
 
-1. Відкрий у Chrome сторінку `chrome://extensions`.
-2. Увімкни перемикач **Developer mode** (режим розробника) — верхній правий кут.
-3. Натисни кнопку **Load unpacked** (Завантажити розпаковане).
-4. У діалозі вибери **папку розширення**:
+1. Open `chrome://extensions` in Chrome.
+2. Turn on the **Developer mode** toggle — top right corner.
+3. Click **Load unpacked**.
+4. In the dialog, pick the **extension folder**:
    `~/Projects/browser-extensions/google-chrome/yt-dual-subs`
-   (саме цю папку, де лежить `manifest.json`).
-5. На панелі з'явиться картка «YT Dual Subs». Відкрий будь-яке відео
-   `https://www.youtube.com/watch?...` — під плеєром з'явиться панель субтитрів.
+   (the folder that contains `manifest.json`).
+5. A "YT Dual Subs" card appears on the panel. Open any video at
+   `https://www.youtube.com/watch?...` — a subtitle panel appears under the player.
 
-### Після зміни коду
+### After changing the code
 
-1. `chrome://extensions` → на картці розширення натисни круглу стрілку **↻ (reload)**.
-2. Онови вкладку YouTube жорстким оновленням: **Ctrl+Shift+R**.
+1. `chrome://extensions` → click the circular **↻ (reload)** arrow on the extension's card.
+2. Hard-refresh the YouTube tab: **Ctrl+Shift+R**.
 
-Без цих двох кроків Chrome і далі крутить стару версію коду.
+Without these two steps Chrome keeps running the old version of the code.
 
-## Як користуватися
+## How to use it
 
-Розширення **не змінює інтерфейс YouTube**. Воно додає одну кнопку 📖 у панель
-керування плеєра (біля CC / налаштувань). Дивишся відео як завжди, а коли хочеш
-вчитися — тиснеш цю кнопку → відкривається **повноекранний режим навчання**.
+The extension **doesn't change YouTube's interface**. It adds a single 📖 button
+to the player controls (next to CC / settings). You watch videos as usual, and
+when you want to study — click that button → a **full-screen study mode** opens.
 
-## Можливості
+## Features
 
-- **Режим навчання на весь екран**: два ряди субтитрів — **EN** (оригінал) над
-  фіксованою серединою екрана, переклад під нею. Англійський рядок «прив'язаний»
-  до цієї лінії й **не смикається** незалежно від довжини речення.
-- **Пословна поява** субтитрів, як у YouTube (за таймкодом кожного слова),
-  без розриву посеред речення.
-- **Власні контроли відтворення**: ⏪ пауза/плей ⏩, **швидкість** (0.5×–2×),
-  час, клікабельний прогрес-бар — керують відео напряму.
-- **Режим шедовінгу (кнопка «Навчання»)**: відео грає **одне речення** — від
-  його початку до крапки — і зупиняється. Кнопки **← Попереднє · ↻ Повторити ·
-  Наступне →** дають повторювати речення по колу, доки не завчиш, тоді перейти
-  далі. Вихід із режиму читання → відео грає як завжди.
-- Тумблери **EN / UA**, **вибір мови перекладу** (uk, en, pl, de, es, fr, it, ru).
-- **Теми**: Книжкова (сепія), Темна, Світла. **Розмір шрифту** (A− / A+).
-- Вихід — кнопка **✕** або **Esc**.
-- Кнопка **«Лог»** — вбудований журнал діагностики (див. нижче).
+- **Full-screen study mode**: two subtitle rows — **EN** (original) above the
+  fixed screen midline, translation below it. The English line is "anchored"
+  to that line and **never jumps** regardless of sentence length.
+- **Word-by-word reveal** of subtitles, like on YouTube (by each word's
+  timecode), without breaking mid-sentence.
+- **Custom playback controls**: ⏪ pause/play ⏩, **speed** (0.5×–2×), time,
+  a clickable progress bar — control the video directly.
+- **Shadowing mode ("Study" button)**: the video plays **one sentence** — from
+  its start to the period — and stops. **← Previous · ↻ Repeat · Next →**
+  buttons let you repeat a sentence in a loop until you've got it, then move
+  on. Exiting study mode → the video plays normally again.
+- **EN / UA toggles**, **translation language picker** (uk, en, pl, de, es, fr, it, ru).
+- **Themes**: Sepia, Dark, Light. **Font size** (A− / A+).
+- Exit — **✕** button or **Esc**.
+- **"Log"** button — a built-in diagnostics log (see below).
 
-### Шедовінг (shadowing)
+### Shadowing
 
-Техніка: повторюєш вголос одне речення слідом за диктором, доки не звучить
-природно, потім береш наступне. Увімкни **«Навчання»** — відео зупиниться на
-крапці поточного речення; тисни **↻ Повторити** скільки треба, тоді
-**Наступне →**. Речення визначаються за пунктуацією (`.`, `!`, `?`, `…`)
-незалежно від того, як субтитри розбиті на рядки.
+Technique: you repeat one sentence out loud right after the speaker, until it
+sounds natural, then move to the next. Turn on **"Study"** — the video stops at
+the end of the current sentence; hit **↻ Repeat** as many times as needed, then
+**Next →**. Sentences are detected by punctuation (`.`, `!`, `?`, `…`)
+regardless of how the captions are split into lines.
 
-## Як воно влаштоване
+## How it's built
 
-- `manifest.json` — Manifest V3, два контент-скрипти на `www.youtube.com`.
-- `injected.js` — світ сторінки (`world: MAIN`): перехоплює запити плеєра до
-  `/api/timedtext` (вони містять валідний токен `pot`), читає `getPlayerResponse()`
-  і за потреби вмикає субтитри (клік по кнопці CC).
-- `content.js` — ізольований світ: додає кнопку в плеєр, будує повноекранний
-  оверлей навчання, отримує субтитри, кешує валідне посилання, синхронізує
-  пословну появу з `<video>.currentTime`.
-- `content.css` — стилі оверлея, кнопки та контролів.
+- `manifest.json` — Manifest V3, two content scripts on `www.youtube.com`.
+- `injected.js` — page world (`world: MAIN`): intercepts the player's own
+  requests to `/api/timedtext` (they carry a valid `pot` token), reads
+  `getPlayerResponse()`, and enables captions when needed (clicks the CC button).
+- `content.js` — isolated world: adds the button to the player, builds the
+  full-screen study overlay, fetches captions, caches the valid URL, syncs
+  the word-by-word reveal with `<video>.currentTime`.
+- `content.css` — styles for the overlay, button, and controls.
 
-### Звідки беруться субтитри
+### Where the subtitles come from
 
-YouTube більше не віддає субтитри за «голим» посиланням з `getPlayerResponse`
-(потрібен токен `pot`). Тому розширення **перехоплює власний запит плеєра** до
-`/api/timedtext`, дістає з нього валідне посилання й перевикористовує його:
-для оригіналу (EN) та для перекладу (`&tlang=<код мови>`). Посилання кешується,
-тож зміна мови не потребує повторного перехоплення.
+YouTube no longer serves subtitles from a "bare" URL taken from
+`getPlayerResponse` (a `pot` token is required). So the extension **intercepts
+the player's own request** to `/api/timedtext`, extracts a valid URL from it,
+and reuses it: for the original (EN) and for the translation
+(`&tlang=<language code>`). The URL is cached, so switching language doesn't
+require a new interception.
 
-## Діагностика (кнопка «Лог»)
+## Diagnostics (the "Log" button)
 
-Натисни **«Лог»** у панелі — відкриється чорне віконце з подіями. Ключові рядки:
+Click **"Log"** in the panel — a black log window opens with events. Key lines:
 
-- `доріжок з playerResponse: N [...]` — скільки доріжок субтитрів бачить плеєр
-  (`0` = у відео немає субтитрів YouTube).
-- `перехоплено timedtext (…, тіло=… б)` — плеєр зробив запит субтитрів і чи не порожнє тіло.
-- `EN за валідним URL: N` / `готово: EN N · UK M` — скільки рядків завантажилось.
-- `використовую збережене валідне посилання` — спрацював кеш (напр. при зміні мови).
+- `tracks from playerResponse: N [...]` — how many subtitle tracks the player
+  sees (`0` = the video has no YouTube captions).
+- `intercepted timedtext (…, body=… bytes)` — the player made a captions
+  request and whether the body was non-empty.
+- `EN via valid URL: N` / `ready: EN N · UK M` — how many lines loaded.
+- `using cached valid URL` — the cache kicked in (e.g. on language switch).
 
-## Обмеження
+## Limitations
 
-- Переклад — **авто-переклад від YouTube** (`&tlang=`). Якість «читабельна».
-  План: замінити на DeepL/LLM з кешем у Postgres.
-- Якщо у відео **немає субтитрів YouTube** (текст «вшитий» у картинку, як у деяких
-  graded-reader каналів) — читати нічого; знадобиться розпізнавання (Whisper).
-- Якщо в плеєрі субтитри вимкнені й кнопка CC не спрацьовує автоматично —
-  увімкни **CC** вручну один раз, перехоплення підхопиться саме.
+- Translation is **YouTube's auto-translate** (`&tlang=`). Quality is
+  "readable" at best. Plan: replace with DeepL/LLM with a Postgres cache.
+- If the video **has no YouTube captions** (text "burned" into the picture,
+  as on some graded-reader channels) — there's nothing to read; would need
+  speech recognition (Whisper).
+- If captions are off in the player and the CC button doesn't trigger
+  automatically — turn on **CC** manually once, and interception will pick it up.
 
-## Плани
+## Roadmap
 
-- [ ] Клік по слову → переклад окремого слова (словник).
-- [ ] DeepL замість `tlang` + кеш перекладів.
-- [ ] Гарячі клавіші (повтор / наступне речення / пауза).
-- [x] Регулювання розміру шрифту.
-- [x] Регулювання швидкості відтворення.
-- [x] Режим шедовінгу (речення за реченням).
-- [ ] Whisper для відео без субтитрів.
+- [ ] Click a word → translate that single word (dictionary).
+- [ ] DeepL instead of `tlang` + translation cache.
+- [ ] Hotkeys (repeat / next sentence / pause).
+- [x] Font size adjustment.
+- [x] Playback speed adjustment.
+- [x] Shadowing mode (sentence by sentence).
+- [ ] Whisper for videos without captions.

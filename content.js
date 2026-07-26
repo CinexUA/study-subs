@@ -7,11 +7,11 @@
 
   const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: false };
   const LANGS = [
-    ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
-    ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
-    ['it', 'Italiano'], ['ru', 'Русский']
+    ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
+    ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
+    ['it', 'Italian'], ['ru', 'Russian']
   ];
-  const THEMES = [['sepia', 'Книжкова'], ['dark', 'Темна'], ['light', 'Світла']];
+  const THEMES = [['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light']];
   const LEAD = 0.12;
 
   // Subtitle-box icon for the player-controls button (white, YouTube style).
@@ -163,9 +163,10 @@
   }
 
   // True sentence end: terminal punctuation that is not an abbreviation.
-  // A single letter ("U.S.", "п.") or a known title before the period does
+  // A single letter (e.g. "U.S.") or a known title before the period does
   // not close a sentence — splitting there breaks both the stop point and
-  // the UA alignment windows.
+  // the UA alignment windows. The letter class below covers Latin and
+  // Cyrillic since the translation track can be in Ukrainian/Russian.
   const ABBR_RE = /(?:^|[\s.(\[«"'“‘])(?:[a-zа-яіїєґ]|mr|mrs|ms|dr|st|jr|sr|prof|gen|rep|sen|vs|etc|inc|approx)\.$/i;
   function endsSentence(text) {
     const t = String(text).trimEnd().replace(/["'”’»)\]]+$/, '');
@@ -402,9 +403,9 @@
   }
 
   function updateStatus() {
-    const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · переклад недоступний' : '';
+    const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · translation unavailable' : '';
     const srcU = (srcLang || 'en').toUpperCase();
-    setStatus(`джерело: ${srcLang || '?'} · ${srcU} ${enUnitLen} сл · ${state.targetLang.toUpperCase()} ${uaUnitLen} сл · рядків ${enLines.length}${uaNote}`);
+    setStatus(`source: ${srcLang || '?'} · ${srcU} ${enUnitLen} words · ${state.targetLang.toUpperCase()} ${uaUnitLen} words · lines ${enLines.length}${uaNote}`);
     updateLabels();
   }
 
@@ -416,7 +417,7 @@
 
   async function buildFromBase(base, body, capTlang) {
     let enUnits = [];
-    try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch впав: ' + e.message); }
+    try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
     if (!enUnits.length && !capTlang && body) enUnits = parseUnits(body);
     if (!enUnits.length) return false;
     enUnits = splitUnitsByPunct(enUnits);
@@ -444,7 +445,7 @@
     sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null;
-    dbg(`готово: EN ${enUnits.length} сл / ${enLines.length} рядків · ${sentences.length} речень · ${state.targetLang.toUpperCase()} ${uaUnits.length} сл`);
+    dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
     updateStatus();
     if (state.reader && state.study) armStudy();
     return true;
@@ -457,34 +458,34 @@
     awaitingCapture = false;
     clearTimeout(captureTimer);
     clearDisplay();
-    setStatus('завантаження…');
-    dbg('--- loadCaptions для ' + currentVideoId);
+    setStatus('loading…');
+    dbg('--- loadCaptions for ' + currentVideoId);
 
     if (capturedBase && capturedForVideo === currentVideoId) {
-      dbg('використовую збережене валідне посилання');
+      dbg('using cached valid URL');
       if (await buildFromBase(capturedBase, capturedBody, capturedTlang)) return;
-      dbg('збережене посилання не спрацювало (можливо, токен застарів)');
+      dbg('cached URL failed (token may have expired)');
     }
 
     const tracks = await requestTracks();
-    dbg(`доріжок з playerResponse: ${tracks.length}` +
+    dbg(`tracks from playerResponse: ${tracks.length}` +
         (tracks.length ? ' [' + tracks.map((t) => `${t.lang}${t.kind === 'asr' ? '/asr' : ''}`).join(', ') + ']' : ''));
     if (tracks.length) {
       const src = pickSrc(tracks);
       srcLang = src.lang || '';
-      if (await buildFromBase(src.baseUrl, null, '')) { dbg('пряме завантаження спрацювало'); return; }
-      dbg('пряме завантаження дало 0 → потрібне перехоплення');
+      if (await buildFromBase(src.baseUrl, null, '')) { dbg('direct fetch succeeded'); return; }
+      dbg('direct fetch returned 0 → need interception');
     }
 
     awaitingCapture = true;
-    setStatus('вмикаю субтитри плеєра…');
-    dbg('→ прошу плеєр увімкнути CC (YTDS_ENABLE)');
+    setStatus('enabling player captions…');
+    dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
       if (awaitingCapture && !enLines.length) {
         awaitingCapture = false;
-        dbg('таймаут 9с: перехоплення не сталось — імовірно у відео немає субтитрів');
-        setStatus('не вдалося отримати субтитри — увімкни CC у плеєрі вручну');
+        dbg('9s timeout: no capture happened — the video likely has no captions');
+        setStatus('could not fetch captions — enable CC in the player manually');
       }
     }, 9000);
   }
@@ -496,7 +497,7 @@
 
     capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
 
-    if (!(await buildFromBase(base, body, capTlang))) { dbg('капчур без корисних EN — чекаю інший'); return; }
+    if (!(await buildFromBase(base, body, capTlang))) { dbg('capture had no usable EN — waiting for another'); return; }
     awaitingCapture = false;
     clearTimeout(captureTimer);
     window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
@@ -508,7 +509,7 @@
       dbg(e.data.msg);
     } else if (e.data.type === 'YTDS_TT') {
       const tl = /[?&]tlang=([^&]*)/.exec(e.data.url);
-      dbg(`перехоплено timedtext (tlang=${tl ? tl[1] : '-'}, тіло=${(e.data.body || '').length} б)`);
+      dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, body=${(e.data.body || '').length} bytes)`);
       handleCaptured(e.data.url, e.data.body);
     }
   });
@@ -598,7 +599,7 @@
   // Shown in reader when there are no captions yet: surfaces the status/error.
   function showPlaceholder() {
     if (!elRoll) return;
-    const msg = (elStatus && elStatus.textContent) || 'завантаження субтитрів…';
+    const msg = (elStatus && elStatus.textContent) || 'loading captions…';
     if (elRoll.dataset.ph === msg) return;
     elRoll.dataset.ph = msg;
     elRoll.textContent = '';
@@ -667,14 +668,14 @@
       b.addEventListener('click', fn);
       return b;
     };
-    const fontMinus = mkBtn('A−', 'Менший шрифт', () => changeFont(-0.1), 'ytds-step');
-    const fontPlus = mkBtn('A+', 'Більший шрифт', () => changeFont(0.1), 'ytds-step');
+    const fontMinus = mkBtn('A−', 'Smaller font', () => changeFont(-0.1), 'ytds-step');
+    const fontPlus = mkBtn('A+', 'Larger font', () => changeFont(0.1), 'ytds-step');
 
-    btnStudy = mkBtn('Навчання', 'Режим шедовінгу: речення за реченням, зупинка на крапці', () => setStudy(!state.study));
+    btnStudy = mkBtn('Study', 'Shadowing mode: sentence by sentence, stops at each period', () => setStudy(!state.study));
 
     const btnLog = document.createElement('button');
     btnLog.className = 'ytds-btn';
-    btnLog.textContent = 'Лог';
+    btnLog.textContent = 'Log';
     btnLog.addEventListener('click', () => {
       elLog.style.display = elLog.style.display === 'none' ? '' : 'none';
       btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
@@ -682,7 +683,7 @@
 
     const themeSel = document.createElement('select');
     themeSel.className = 'ytds-select';
-    themeSel.title = 'Тема';
+    themeSel.title = 'Theme';
     for (const [code, label] of THEMES) {
       const o = document.createElement('option');
       o.value = code; o.textContent = label;
@@ -693,7 +694,7 @@
 
     langSel = document.createElement('select');
     langSel.className = 'ytds-select';
-    langSel.title = 'Мова перекладу';
+    langSel.title = 'Translation language';
     for (const [code, label] of LANGS) {
       const o = document.createElement('option');
       o.value = code; o.textContent = label;
@@ -717,7 +718,7 @@
     elClose = document.createElement('button');
     elClose.className = 'ytds-close';
     elClose.textContent = '✕';
-    elClose.title = 'Завершити навчання (Esc)';
+    elClose.title = 'Exit study mode (Esc)';
     elClose.addEventListener('click', exitReader);
 
     panel.append(elClose, bar, elRoll, elStatus, elControls, elStudy, elLog);
@@ -736,8 +737,8 @@
       b.addEventListener('click', fn);
       return b;
     };
-    const back = mk('⏪', 'Назад 10 с', () => seek(-10));
-    elPlay = mk('▶', 'Пауза / відтворення', () => {
+    const back = mk('⏪', 'Back 10s', () => seek(-10));
+    elPlay = mk('▶', 'Pause / play', () => {
       if (!video) return;
       if (!video.paused) { video.pause(); return; }
       // In study mode ▶ after the auto-stop means "next sentence" (skips the
@@ -745,11 +746,11 @@
       if (state.study && state.reader && sentences.length && stopAt == null) playSentence(sentIdx + 1);
       else video.play();
     });
-    const fwd = mk('⏩', 'Вперед 10 с', () => seek(10));
+    const fwd = mk('⏩', 'Forward 10s', () => seek(10));
 
     elSpeed = document.createElement('select');
     elSpeed.className = 'ytds-select ytds-speed';
-    elSpeed.title = 'Швидкість відтворення';
+    elSpeed.title = 'Playback speed';
     for (const v of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
       const o = document.createElement('option');
       o.value = String(v); o.textContent = v + '×';
@@ -788,9 +789,9 @@
       b.addEventListener('click', fn);
       return b;
     };
-    const prev = mk('← Попереднє', 'Попереднє речення', () => playSentence(sentIdx - 1));
-    const rep = mk('↻ Повторити', 'Програти це речення від початку до кінця', () => playSentence(sentIdx), 'ytds-primary');
-    const next = mk('Наступне →', 'Наступне речення', () => playSentence(sentIdx + 1));
+    const prev = mk('← Previous', 'Previous sentence', () => playSentence(sentIdx - 1));
+    const rep = mk('↻ Repeat', 'Play this sentence from start to end', () => playSentence(sentIdx), 'ytds-primary');
+    const next = mk('Next →', 'Next sentence', () => playSentence(sentIdx + 1));
     wrap.append(prev, rep, next);
     return wrap;
   }
@@ -882,7 +883,7 @@
     if (!rc || rc.querySelector('.ytds-launch')) return;
     const btn = document.createElement('button');
     btn.className = 'ytp-button ytds-launch';
-    btn.title = 'Навчання: двомовні субтитри (English + переклад)';
+    btn.title = 'Study: dual subtitles (English + translation)';
     btn.innerHTML = LAUNCH_ICON;
     btn.addEventListener('click', enterReader);
     rc.insertBefore(btn, rc.firstChild);
