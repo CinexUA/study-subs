@@ -132,6 +132,22 @@
       return;
     }
 
+    // Same story as playback state: the player keeps its own rate and puts it
+    // back on play, seek, ad or quality change. setPlaybackRate is only honoured
+    // for rates the player offers itself, so anything off that ladder (0.9, 0.7)
+    // is left to the content script's element write plus its ratechange guard.
+    if (e.data.type === 'YTDS_SET_RATE') {
+      const rate = Number(e.data.rate) || 1;
+      try {
+        const p = document.getElementById('movie_player');
+        if (p && p.setPlaybackRate) {
+          const list = (p.getAvailablePlaybackRates && p.getAvailablePlaybackRates()) || [];
+          if (!list.length || list.some((r) => Math.abs(r - rate) < 0.001)) p.setPlaybackRate(rate);
+        }
+      } catch (_) {}
+      return;
+    }
+
     if (e.data.type === 'YTDS_STOP_ENABLE') {
       enableToken++; // invalidate any running retry loop
       return;

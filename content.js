@@ -12,7 +12,10 @@
     ['it', 'Italian'], ['ru', 'Russian']
   ];
   const THEMES = [['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light']];
-  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  // Fine below 1×, where the listening actually happens; coarse above it.
+  // 0.6/0.7/0.8/0.9 are off the player's own ladder, so they live on our
+  // element write and the ratechange guard (see applySpeed).
+  const SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5, 2];
   // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
   const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
   const LEAD = 0.12;
@@ -94,6 +97,11 @@
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
     state.reader = false; // never start a page already in reader mode
+    // A speed saved before the ladder changed (0.75×) would sit in the menu
+    // with nothing ticked: snap it to the nearest step we now offer.
+    if (!SPEEDS.some((v) => Math.abs(v - state.speed) < 0.001)) {
+      state.speed = SPEEDS.reduce((a, b) => (Math.abs(b - state.speed) < Math.abs(a - state.speed) ? b : a));
+    }
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
     syncUi();
@@ -505,9 +513,35 @@
   // Repeat is a plain action, not a mode: play this sentence once more.
   function repeatSentence() { playSentence(sentIdx); }
 
+  // The rate belongs to the player exactly as playback state does: writing it
+  // on the element alone held only until the next play, seek, ad or quality
+  // change, when the player put its own back — "0.75× in the menu, 1× in the
+  // ears". So the element is written first (the stop timer needs it now) and
+  // the wish goes to the player too.
   function applySpeed() {
-    if (video) { try { video.playbackRate = state.speed || 1; } catch (_) {} }
+    const want = state.speed || 1;
+    if (video) { try { video.playbackRate = want; } catch (_) {} }
+    window.postMessage({ type: 'YTDS_SET_RATE', rate: want }, '*');
     armStop(); // the stop timer depends on the playback rate
+  }
+
+  // Last line of defence, the rate's answer to guardPause: whatever put another
+  // rate on, ours goes back — but at most once every 400 ms, so a player that
+  // insists cannot turn this into a loop.
+  let rateFixAt = 0, rateFixNoted = false;
+  function onRateChange() {
+    armStop();
+    if (!video) return;
+    const want = state.speed || 1;
+    if (Math.abs(video.playbackRate - want) < 0.01) return;
+    const now = performance.now();
+    if (now - rateFixAt < 400) return;
+    rateFixAt = now;
+    if (!rateFixNoted) {
+      rateFixNoted = true;
+      dbg(`playback rate came back as ${video.playbackRate}× — putting ${want}× back`);
+    }
+    applySpeed();
   }
 
   function updateStatus() {
@@ -1002,7 +1036,7 @@
       items: SPEEDS.map((v) => [v, v + '×']),
       get: () => state.speed || 1,
       label: (v) => v + '×',
-      pick: (v) => { state.speed = v; saveState(); applySpeed(); }
+      pick: (v) => { state.speed = v; saveState(); rateFixNoted = false; applySpeed(); }
     });
   }
 
@@ -1276,7 +1310,7 @@
     if (video && video !== hookedVideo) {
       hookedVideo = video;
       video.addEventListener('play', armStop);
-      video.addEventListener('ratechange', armStop);
+      video.addEventListener('ratechange', onRateChange);
       video.addEventListener('seeked', onSeeked);
     }
     ensurePanel();
