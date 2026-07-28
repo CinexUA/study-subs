@@ -77,7 +77,7 @@
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter;
   let btnStudy;
-  let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub;
+  let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
@@ -636,6 +636,7 @@
     lastSig = null; lastIdx = -1;
     dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
     updateStatus();
+    renderKeys();   // study mode only owns the keys once there are sentences
     if (state.reader && state.study) armStudy();
     return true;
   }
@@ -1182,15 +1183,11 @@
       }, txt('Copy log'))
     );
 
-    const keys = el('div', 'ytds-keys');
-    for (const [k, t] of [['R', 'repeat'], ['←→', 'sentences'], ['Esc', 'exit']]) {
-      const s = el('span');
-      s.append(el('b', null, k), txt(' ' + t));
-      keys.appendChild(s);
-    }
+    elKeys = el('div', 'ytds-keys');
+    renderKeys();
 
     const drawer = el('aside', 'ytds-drawer');
-    drawer.append(head, body, keys);
+    drawer.append(head, body, elKeys);
 
     const frag = document.createDocumentFragment();
     frag.append(scrim, drawer);
@@ -1210,6 +1207,26 @@
   }
 
   // ---------- syncing UI to state ----------
+  // The same keys mean different things in the two modes: study mode claims
+  // Space, R and the arrows, while free reading hands Space and R back to the
+  // player and keeps only the ±5 s seek. One fixed list would therefore be a
+  // lie half the time, so the hints follow the mode. Same condition the key
+  // handler uses — without sentences there is nothing for study mode to claim.
+  function renderKeys() {
+    if (!elKeys) return;
+    const study = !!state.study && sentences.length > 0;
+    elKeys.textContent = '';
+    elKeys.appendChild(el('span', 'ytds-keys-mode', study ? 'Study' : 'Free'));
+    const rows = study
+      ? [['Space', 'play / pause'], ['R', 'repeat'], ['←→', 'sentence'], ['Esc', 'exit']]
+      : [['←→', 'seek 5 s'], ['Esc', 'exit'], ['Space R', 'player']];
+    for (const [k, t] of rows) {
+      const s = el('span');
+      s.append(el('b', null, k), txt(' ' + t));
+      elKeys.appendChild(s);
+    }
+  }
+
   function syncUi() {
     if (!panel) return;
     applyTheme();   // also carries the study/drawer state classes
@@ -1218,6 +1235,7 @@
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
     for (const m of menus) m.sync();
+    renderKeys();
     updateLabels();
     updateCounter();
     applyLayout();

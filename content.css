@@ -639,6 +639,15 @@
   color: var(--ink-3);
 }
 .ytds-keys b { font: inherit; font-family: var(--mono); color: var(--ink-2); }
+/* Which mode these hints belong to — the keys change meaning with it. */
+.ytds-keys-mode {
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  opacity: 0.7;
+}
 
 /* ---------- Launch button in the YouTube player controls ----------
    Lives outside .ytds-panel, so it has no access to the theme tokens. */
