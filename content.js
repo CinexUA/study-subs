@@ -68,6 +68,8 @@
   let stopAt = null;
   let stopTimer = null;      // precise stop scheduled for the exact remaining time
   let suppressSeek = false;  // our own currentTime writes must not look like user seeks
+  let pauseIntentAt = 0;     // when we last asked for a pause (resume guard)
+  let pauseGuardNoted = false;   // the guard logs once per pause, not per frame
   let hookedVideo = null;    // the <video> we attached play/seek/rate listeners to
 
   // ---------- state ----------
@@ -368,6 +370,38 @@
   // Playback stops at the end of a sentence only in study mode.
   function stopping() { return !!state.study; }
 
+  // The player keeps its own idea of whether the video should be playing, and
+  // when we drive the media element behind its back it puts playback back on a
+  // moment later — a pause that "does not stick", and every sentence stop lost
+  // with it. So each play/pause also goes through the player API in the page
+  // world (that is the path the Space key takes, and Space always behaves).
+  // The element call stays first: it is synchronous, which the stop needs.
+  function playVideo() {
+    if (!video) return;
+    pauseIntentAt = 0;
+    video.play().catch(() => {});
+    window.postMessage({ type: 'YTDS_PLAY' }, '*');
+  }
+  function pauseVideo() {
+    if (!video) return;
+    pauseIntentAt = performance.now();
+    pauseGuardNoted = false;
+    video.pause();
+    window.postMessage({ type: 'YTDS_PAUSE' }, '*');
+  }
+
+  // Last line of defence: if playback is on again within a blink of our pause,
+  // nobody asked for it — hold the pause. The window is measured from the
+  // original request and never extended, so this can fight the player for at
+  // most 250 ms and can never trap a user who wants to resume.
+  function guardPause() {
+    if (!pauseIntentAt || !video || video.paused) return;
+    if (performance.now() - pauseIntentAt > 250) { pauseIntentAt = 0; return; }
+    if (!pauseGuardNoted) { pauseGuardNoted = true; dbg('playback resumed right after our pause — holding it'); }
+    video.pause();
+    window.postMessage({ type: 'YTDS_PAUSE' }, '*');
+  }
+
   // Seek to just before a sentence's first word and play until its end.
   function playSentence(i) {
     if (!video || !sentences.length) return;
@@ -378,7 +412,7 @@
     // A touch early, so the first word's attack isn't clipped by the seek.
     const from = Math.min(Math.max(s.start - 0.15, prevEnd), s.start);
     try { video.currentTime = from; } catch (_) {}
-    video.play().catch(() => {});
+    playVideo();
     armStop();
     lastSig = null; lastCtl = '';
   }
@@ -396,7 +430,7 @@
     clearTimeout(stopTimer); stopTimer = null;
     if (stopAt == null || !video || video.paused) return;
     if (video.currentTime < stopAt - 0.005) { armStop(); return; } // fired early (seek lag / buffering)
-    video.pause();
+    pauseVideo();
     const over = video.currentTime - stopAt;
     if (over > 0.005 && over < 0.8) {
       suppressSeek = true; // our own correction — not a user seek
@@ -598,6 +632,7 @@
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
+    guardPause();
     // The precise stop timer does the real work; this is a backup.
     if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
     if (!video || (!sentences.length && !enLines.length)) { showPlaceholder(); return; }
@@ -945,7 +980,7 @@
 
   function togglePlay() {
     if (!video) return;
-    if (!video.paused) { video.pause(); return; }
+    if (!video.paused) { pauseVideo(); return; }
     // ▶ never leaves study mode unarmed: whoever paused us and however long
     // ago, take the sentence the playhead is in and stop at its end again.
     if (state.reader && stopping() && sentences.length) {
@@ -955,7 +990,7 @@
       if (video.currentTime <= sentences[i].start) { playSentence(i); return; }
       armStudy();
     }
-    video.play().catch(() => {});
+    playVideo();
   }
 
   function buildScrub() {

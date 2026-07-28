@@ -105,6 +105,19 @@
       return;
     }
 
+    // Play/pause through the player itself, so its state machine agrees with
+    // us and does not put playback back on a moment after our own pause.
+    if (e.data.type === 'YTDS_PLAY' || e.data.type === 'YTDS_PAUSE') {
+      const wantPlay = e.data.type === 'YTDS_PLAY';
+      try {
+        const p = document.getElementById('movie_player');
+        if (p && p.playVideo && p.pauseVideo) { wantPlay ? p.playVideo() : p.pauseVideo(); return; }
+      } catch (_) {}
+      // No player API (an early frame, a layout we do not know): the content
+      // script has already driven the media element, so there is nothing left.
+      return;
+    }
+
     if (e.data.type === 'YTDS_STOP_ENABLE') {
       enableToken++; // invalidate any running retry loop
       return;
