@@ -35,7 +35,10 @@
     // The one glyph not drawn on the shared 20×20 pencil: it is Vitaliy's own
     // reference shape (svgrepo "replay symbol"), kept on its native 30-unit
     // grid and merely recoloured — the silhouette is the spec here.
-    replay: '<svg viewBox="0 0 29.963 29.963" fill="none"><path fill="currentColor" d="' +
+    // The path fills that grid edge to edge, while play/pause take ~55% of
+    // theirs, so the viewBox is padded out to 48.3 (≈62%) — otherwise this
+    // glyph sits noticeably larger than the rest of the transport.
+    replay: '<svg viewBox="-9.18 -9.18 48.33 48.33" fill="none"><path fill="currentColor" d="' +
       'M29.133,9.215c-0.775-0.428-1.751-0.146-2.178,0.63l-0.518,0.937c-1.772-5.424-6.874-9.356-12.882-9.356' +
       'C6.081,1.426,0,7.507,0,14.981s6.081,13.555,13.555,13.555c0.886,0,1.604-0.718,1.604-1.603' +
       'c0-0.885-0.718-1.603-1.604-1.603c-5.706,0-10.349-4.643-10.349-10.35S7.849,4.632,13.555,4.632' +
