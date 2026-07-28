@@ -521,7 +521,14 @@
   // The two used to be one value, and that is exactly why the next sentence's
   // first syllable bled through on every sentence the author did not pause after.
   const SENT_TAIL = 0.12;   // let the last word ring out when there is room
-  const SENT_GUARD = 0.2;   // silence we insist on before the next word's onset
+  const SENT_GUARD = 0.2;   // silence we ask for before the next word's onset
+  // …and the silence we never give up, whatever the floor below would rather
+  // have. The floor used to sit outside the clamp and quietly overrule the
+  // guard: with the next onset less than 320 ms away it left as little as 60 ms,
+  // which is the "Aabbb…" that survived night 11 — clean where the author
+  // paused, audible where speech ran on. The price is named: on very tight
+  // sentences the last word now loses a few tens of ms.
+  const SENT_GUARD_MIN = 0.15;
   function buildSentences(units) {
     const out = [];
     let cur = null, buf = '';
@@ -549,10 +556,26 @@
         // Trusted: today's value, except a multi-word unit may outlive the
         // single-word cap baked into spokenEnd — a whole line is meant to be long.
         const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
-        cur.stop = Math.max(
-          Math.min(spoken + (ridesNext ? SENT_TAIL : 0.2), next.t - SENT_GUARD),
-          Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
+        // Where we would like to pause: today's boundary, then the guarantee
+        // that the floor may no longer overrule.
+        const want = Math.min(
+          Math.max(
+            Math.min(spoken + (ridesNext ? SENT_TAIL : 0.2), next.t - SENT_GUARD),
+            Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
+          ),
+          next.t - SENT_GUARD_MIN               // …which silence now outranks
         );
+        // And two limits that are structural rather than a matter of taste:
+        // a stop at or past the next onset plays the very word we are avoiding,
+        // and a stop before the sentence began gives uaRevealCount a negative
+        // span and findSentenceAt a sentence it can never be inside.
+        cur.stop = Math.min(Math.max(want, cur.start + 0.02), next.t - 0.03);
+        cur.gap = next.t - cur.stop;   // silence actually left, for the log
+        // Under ~150 ms between the two onsets both wishes cannot hold at once,
+        // and silence wins: the last word is then cut short of its own onset.
+        // At that distance it is a syllable fragment on an ASR timestamp, but
+        // it is a real cost and the log names it.
+        cur.trimmed = cur.stop < u.t;
       } else {
         cur.stop = cur.end;
       }
@@ -708,6 +731,15 @@
     // thing to read: the rAF backup can only be a frame late, so if it is the
     // one reporting 200 ms, the main thread was blocked and no schedule helps.
     if (over > 0.05) dbg(`sentence stop overshot by ${Math.round(over * 1000)} ms (${who})`);
+    // How much silence the boundary itself left before the next word. Worth a
+    // line only when it fell short of what we ask for — those are the sentences
+    // where a bleed can still be heard, and they are what tells a boundary
+    // placed too tight apart from audio the browser had already queued out.
+    const s = sentences[sentIdx];
+    if (s && s.gap != null && s.gap < SENT_GUARD - 0.001) {
+      dbg(`sentence ${sentIdx + 1} stopped ${Math.round(s.gap * 1000)} ms before the next word`
+        + (s.trimmed ? ', last word cut' : ''));
+    }
     if (over > 0.005 && over < 0.8) {
       suppressSeek = true; // our own correction — not a user seek
       try { video.currentTime = stopAt; } catch (_) { suppressSeek = false; }
