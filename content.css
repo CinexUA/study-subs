@@ -100,6 +100,15 @@
   -webkit-appearance: none;
   appearance: none;
 }
+/* Chrome's default focus ring is a black outline that sticks to a button
+   after a click. Drop it and give keyboard users an accent ring instead —
+   equal specificity, so :focus-visible wins by coming last. */
+.ytds-panel :focus, .ytds-panel:focus { outline: none; }
+.ytds-panel :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 /* Icons carry no width/height of their own — every size comes from here. */
 .ytds-panel svg {
   display: block;
