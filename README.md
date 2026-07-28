@@ -45,13 +45,16 @@ when you want to study — click that button → a **full-screen study mode** op
   the start of the sentence under the cursor.
 - **Shadowing row**: **Previous · Repeat · Next**. "Repeat" is a plain action —
   one press replays the current sentence from its start.
-- **Study mode ("Study" button in the top bar, also in settings)**: the
-  overlay switches to one sentence at a time and the video stops at the end of
-  each sentence, with the shadowing row underneath. Off — free playback with
-  the rolling two-line transcript.
-- **Settings drawer** (⚙ in the top bar): subtitle rows on/off, translation
-  language (uk, en, pl, de, es, fr, it, ru), size (XS…XL), speed, auto-pause,
-  theme (Sepia / Dark / Light), and the diagnostics log.
+- **Study mode ("Study" button in the top bar)**: the overlay switches to one
+  sentence at a time and the video stops at the end of each sentence, with the
+  shadowing row underneath. Off — free playback with the rolling two-line
+  transcript.
+- **Everything you touch while watching lives in the top bar**: the two rows
+  on/off, the translation language (uk, en, pl, de, es, fr, it, ru), text size
+  (XS…XL), study mode, and the theme (Sepia / Dark / Light). Speed sits in the
+  transport row with the rest of the playback controls.
+- **Settings drawer** (⚙ in the top bar) holds only what you never touch mid
+  video: the diagnostics log.
 - **Hotkeys**: `R` repeat, `←`/`→` previous / next sentence, `Esc` exit.
 - The design follows the "YT Dual Subs — Design Language v1" bundle in the
   context repo (`designs/v1.0`): one set of tokens, three themes, all sizes
@@ -87,8 +90,8 @@ require a new interception.
 
 ## Diagnostics (settings → Advanced)
 
-Open the settings drawer (⚙) and scroll to **Advanced** — the log lives there,
-with a "Copy log" button. Key lines:
+Open the settings drawer (⚙) — **Advanced** is all it holds: the log, with a
+"Copy log" button. Key lines:
 
 - `tracks from playerResponse: N [...]` — how many subtitle tracks the player
   sees (`0` = the video has no YouTube captions).

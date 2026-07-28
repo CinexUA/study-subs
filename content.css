@@ -403,6 +403,8 @@
 }
 .ytds-menu.ytds-open { display: block; animation: ytds-menu-in 180ms var(--ease-out) both; }
 .ytds-menu.ytds-below { top: calc(100% + .6 * var(--u)); bottom: auto; left: auto; right: 0; }
+/* In the top bar a dropdown hangs under its own pill, not off the right edge. */
+.ytds-top .ytds-menu.ytds-below { left: 0; right: auto; }
 .ytds-menu button {
   display: flex;
   width: 100%;
@@ -539,7 +541,15 @@
 .ytds-drawer-head button:hover { background: var(--bg-hover); color: var(--ink); }
 .ytds-drawer-head button svg { width: 52%; height: 52%; }
 
-.ytds-drawer-body { flex: 1 1 auto; overflow: auto; padding: 0 calc(2 * var(--u)) calc(2 * var(--u)); }
+/* Diagnostics only, so the log is free to take whatever height is left. */
+.ytds-drawer-body {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  padding: 0 calc(2 * var(--u)) calc(2 * var(--u));
+}
+.ytds-drawer-body .ytds-text-btn { align-self: flex-start; }
 .ytds-group-title {
   margin: calc(1.8 * var(--u)) 0 calc(.5 * var(--u));
   display: flex;
@@ -551,55 +561,20 @@
   color: var(--ink-3);
 }
 .ytds-group-title svg { width: calc(1.2 * var(--u)); height: calc(1.2 * var(--u)); }
-.ytds-row {
+/* Theme swatches: their own sunken tray in the top bar, next to the gear. */
+.ytds-swatches {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: calc(1 * var(--u));
-  padding: calc(.85 * var(--u)) 0;
-  border-bottom: 1px solid var(--line-2);
-  font: 400 calc(1.25 * var(--u)) / 1.35 var(--sans);
-  color: var(--ink);
-}
-.ytds-row:last-child { border-bottom: none; }
-.ytds-row-hint {
-  margin-top: calc(.25 * var(--u));
-  font: 400 calc(1 * var(--u)) / 1.35 var(--sans);
-  color: var(--ink-3);
-}
-
-/* Toggle: track + spring-loaded knob. */
-.ytds-toggle {
-  position: relative;
-  width: calc(3.9 * var(--u));
-  height: calc(2.3 * var(--u));
-  flex: none;
-  padding: 0;
+  gap: calc(.5 * var(--u));
+  padding: calc(.34 * var(--u));
   border: 1px solid var(--line);
   border-radius: var(--r-pill);
   background: var(--bg-sunken);
   box-shadow: var(--press);
-  transition: background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out);
 }
-.ytds-toggle span {
-  position: absolute;
-  top: calc(.17 * var(--u));
-  left: calc(.17 * var(--u));
-  width: calc(1.8 * var(--u));
-  height: calc(1.8 * var(--u));
-  border-radius: 50%;
-  background-color: var(--bg-elev);
-  background-image: var(--face);
-  box-shadow: var(--e2);
-  transition: transform var(--d3) var(--ease-spring);
-}
-.ytds-toggle.ytds-on { background: var(--accent); border-color: var(--accent); }
-.ytds-toggle.ytds-on span { transform: translateX(calc(1.6 * var(--u))); }
-
-.ytds-swatches { display: flex; gap: calc(.7 * var(--u)); }
 .ytds-swatch {
-  width: calc(2.2 * var(--u));
-  height: calc(2.2 * var(--u));
+  width: calc(1.9 * var(--u));
+  height: calc(1.9 * var(--u));
   padding: 0;
   border: none;
   border-radius: 50%;
@@ -607,13 +582,10 @@
   transition: transform var(--d2) var(--ease-spring), box-shadow var(--d2) var(--ease-out);
 }
 .ytds-swatch:hover { transform: scale(1.12); }
-.ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--accent); }
+.ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-sunken), 0 0 0 3px var(--accent); }
 .ytds-swatch-sepia { background: linear-gradient(135deg, #e9dcc2 50%, #8a4b12 50%); }
 .ytds-swatch-dark  { background: linear-gradient(135deg, #171310 50%, #d98f4d 50%); }
 .ytds-swatch-light { background: linear-gradient(135deg, #f8f4ec 50%, #9a5518 50%); }
-
-.ytds-drawer .ytds-pill { height: calc(2.3 * var(--u)); font-size: calc(1.05 * var(--u)); box-shadow: var(--e1); }
-.ytds-drawer .ytds-menu { min-width: calc(11 * var(--u)); }
 
 .ytds-status {
   margin-top: calc(1 * var(--u));
@@ -623,7 +595,8 @@
 }
 .ytds-log {
   margin-top: calc(1 * var(--u));
-  max-height: calc(16 * var(--u));
+  flex: 1 1 auto;
+  min-height: calc(10 * var(--u));
   overflow-y: auto;
   padding: calc(1 * var(--u));
   border-radius: var(--r-sm);

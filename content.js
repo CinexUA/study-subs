@@ -783,7 +783,7 @@
 
   function toggleKey(key) { state[key] = !state[key]; saveState(); syncUi(); }
 
-  // A− / step / A+ tray. Lives both in the top bar and in the drawer.
+  // A− / step / A+ tray in the top bar.
   function mkFontSeg() {
     const seg = el('div', 'ytds-seg');
     seg.append(
@@ -792,16 +792,6 @@
       mkBtn('ytds-step ytds-step-lg', 'Larger text', () => changeFont(1), txt('A'))
     );
     return seg;
-  }
-
-  function mkToggle(key, onChange) {
-    const b = mkBtn('ytds-toggle', '', () => {
-      state[key] = !state[key];
-      saveState();
-      if (onChange) onChange(state[key]); else syncUi();
-    }, el('span'));
-    b.dataset.key = key;
-    return b;
   }
 
   function closeMenus() {
@@ -853,6 +843,8 @@
     const segLang = el('div', 'ytds-seg');
     const bEn = mkBtn('', 'Show the original line', () => toggleKey('showEn'), txt('EN'));
     bEn.dataset.key = 'showEn';
+    // Both chip labels follow the real languages (updateLabels), so the second
+    // one never claims "UK" while the menu next to it says German.
     const bUa = mkBtn('', 'Show the translation line', () => toggleKey('showUa'), txt('UK'));
     bUa.dataset.key = 'showUa';
     segLang.append(bEn, bUa);
@@ -862,12 +854,13 @@
     btnStudy.dataset.key = 'study';
 
     const left = el('div', 'ytds-top-side');
-    left.append(segLang, mkFontSeg(), btnStudy);
+    left.append(segLang, mkLangMenu(), mkFontSeg(), btnStudy);
 
     elCounter = el('div', 'ytds-counter');
 
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
+      buildSwatches(),
       mkBtn('ytds-icon ytds-gear', 'Settings', openDrawer, icon('settings')),
       mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))
     );
@@ -911,21 +904,31 @@
       mkBtn('ytds-icon', 'Back 10s', () => seek(-10), icon('rewind')),
       elPlay,
       mkBtn('ytds-icon', 'Forward 10s', () => seek(10), icon('forward')),
-      mkSpeedMenu(false),
+      mkSpeedMenu(),
       elTime,
       buildScrub()
     );
     return elControls;
   }
 
-  function mkSpeedMenu(below) {
+  function mkSpeedMenu() {
     return mkMenu({
       title: 'Playback speed',
-      below,
       items: SPEEDS.map((v) => [v, v + '×']),
       get: () => state.speed || 1,
       label: (v) => v + '×',
       pick: (v) => { state.speed = v; saveState(); applySpeed(); }
+    });
+  }
+
+  function mkLangMenu() {
+    return mkMenu({
+      title: 'Translate into',
+      below: true, text: true,
+      items: LANGS,
+      get: () => state.targetLang,
+      label: (v) => (LANGS.find((l) => l[0] === v) || [v, v])[1],
+      pick: (v) => { state.targetLang = v; saveState(); loadCaptions(); }
     });
   }
 
@@ -983,14 +986,6 @@
     const head = el('div', 'ytds-drawer-head');
     head.append(el('span', null, 'Settings'), mkBtn('', 'Close', closeDrawer, icon('close')));
 
-    const row = (title, control, hint) => {
-      const left = el('div');
-      left.appendChild(txt(title));
-      if (hint) left.appendChild(el('div', 'ytds-row-hint', hint));
-      const r = el('div', 'ytds-row');
-      r.append(left, control);
-      return r;
-    };
     const group = (title, iconName) => {
       const g = el('div', 'ytds-group-title');
       if (iconName) g.appendChild(icon(iconName));
@@ -1001,28 +996,11 @@
     elStatus = el('div', 'ytds-status');
     elLog = el('div', 'ytds-log');
 
+    // Everything that has a control on the main screen — the two lines, the
+    // language, size, speed, study mode, the theme — is deliberately NOT
+    // duplicated here. What is left is what you never touch while watching.
     const body = el('div', 'ytds-drawer-body');
     body.append(
-      group('Subtitles'),
-      row('Original line', mkToggle('showEn')),
-      row('Translation line', mkToggle('showUa')),
-      row('Translation language', mkMenu({
-        title: 'Translation language',
-        below: true, text: true,
-        items: LANGS,
-        get: () => state.targetLang,
-        label: (v) => (LANGS.find((l) => l[0] === v) || [v, v])[1],
-        pick: (v) => { state.targetLang = v; saveState(); loadCaptions(); }
-      })),
-      row('Size', mkFontSeg()),
-
-      group('Playback'),
-      row('Speed', mkSpeedMenu(true)),
-      row('Pause at the end of a sentence', mkToggle('study', setStudy), 'Gives you a second to repeat it out loud'),
-
-      group('Appearance'),
-      row('Theme', buildSwatches()),
-
       group('Advanced', 'console'),
       elStatus,
       elLog,
