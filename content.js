@@ -105,6 +105,9 @@
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
     syncUi();
+    // The saved state lands AFTER the first tick(), so the speed applied there
+    // was still the default: without this the menu showed 0.5× while 1× played.
+    applySpeed();
   });
   const saveState = () => chrome.storage.local.set({ ytds: state });
 
@@ -527,21 +530,23 @@
 
   // Last line of defence, the rate's answer to guardPause: whatever put another
   // rate on, ours goes back — but at most once every 400 ms, so a player that
-  // insists cannot turn this into a loop.
+  // insists cannot turn this into a loop. Only while the overlay is open: with
+  // it closed the speed on YouTube is the user's own business, not ours.
   let rateFixAt = 0, rateFixNoted = false;
-  function onRateChange() {
-    armStop();
-    if (!video) return;
-    const want = state.speed || 1;
-    if (Math.abs(video.playbackRate - want) < 0.01) return;
+  const rateDrifted = () => !!video && Math.abs(video.playbackRate - (state.speed || 1)) > 0.01;
+  function enforceRate() {
     const now = performance.now();
     if (now - rateFixAt < 400) return;
     rateFixAt = now;
     if (!rateFixNoted) {
       rateFixNoted = true;
-      dbg(`playback rate came back as ${video.playbackRate}× — putting ${want}× back`);
+      dbg(`playback rate came back as ${video.playbackRate}× — putting ${state.speed || 1}× back`);
     }
     applySpeed();
+  }
+  function onRateChange() {
+    armStop();
+    if (state.reader && rateDrifted()) enforceRate();
   }
 
   function updateStatus() {
@@ -1226,6 +1231,7 @@
     document.documentElement.classList.add('ytds-reader');
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
     syncUi();
+    applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
   }
 
@@ -1312,6 +1318,7 @@
       video.addEventListener('play', armStop);
       video.addEventListener('ratechange', onRateChange);
       video.addEventListener('seeked', onSeeked);
+      applySpeed(); // a fresh element starts at 1×, whatever the menu says
     }
     ensurePanel();
     ensureLaunchButton();
@@ -1321,6 +1328,10 @@
       applySpeed(); // playbackRate resets on each new video
       loadCaptions();
     }
+    // The player takes the rate back at moments that do not always announce
+    // themselves with a ratechange event (a swapped element, an ad, a quality
+    // switch). One comparison a second, and only while the overlay is open.
+    if (state.reader && rateDrifted()) enforceRate();
   }
 
   document.addEventListener('yt-navigate-finish', tick);
