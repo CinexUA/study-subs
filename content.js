@@ -5,6 +5,7 @@
 (() => {
   'use strict';
 
+  const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
   const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
@@ -75,6 +76,7 @@
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
   let lastPlayIcon = '';  // transport glyph currently in the DOM (play/pause/replay)
   let currentVideoId = null;
+  let throttledUntil = 0;    // HTTP 429: when we may ask for a translation again
   let awaitingCapture = false;
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
@@ -102,6 +104,12 @@
   let hookedVideo = null;    // the <video> we attached play/seek/rate listeners to
 
   // ---------- state ----------
+  // A back-off started on a previous page load still counts.
+  chrome.storage.local.get(THROTTLE_KEY, (r) => {
+    const left = (r[THROTTLE_KEY] || 0) - Date.now();
+    if (left > 0) { throttledUntil = performance.now() + left; dbg(`captions rate-limited, ${Math.ceil(left / 1000)}s to go`); }
+  });
+
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
     state.reader = false; // never start a page already in reader mode
@@ -167,17 +175,101 @@
     } catch (_) { return url; }
   }
 
+  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+  const RETRY_MS = 3000;      // one second chance after a 429: a burst can be bad luck
+  const THROTTLE_MS = 60000;  // twice in a row is the quota talking — stop asking
+
+  // Every attempt says what came back. The translation is the one track we
+  // fetch ourselves — the original arrives inside the interception — so when
+  // it comes back empty this is the only place that can tell whether the
+  // server refused (HTTP), answered with nothing (the pot signature) or
+  // answered with something we failed to parse.
   async function fetchUnits(baseUrl, tlang) {
+    const left = throttledUntil - performance.now();
+    if (tlang && left > 0) {
+      dbg(`fetch ${tlang}: skipped — rate-limited, ${Math.ceil(left / 1000)}s to go`);
+      return [];
+    }
     const tl = tlang ? '&tlang=' + encodeURIComponent(tlang) : '';
     for (const fmt of ['&fmt=json3', '']) {
-      const res = await fetch(baseUrl + fmt + tl);
-      if (!res.ok) continue;
+      const what = `${tlang || 'source'}${fmt ? ' json3' : ' no-fmt'}`;
+      const ask = () => fetch(baseUrl + fmt + tl);
+      let res;
+      try {
+        res = await ask();
+        if (res.status === 429) {
+          dbg(`fetch ${what}: HTTP 429 — waiting ${RETRY_MS / 1000}s and asking once more`);
+          await delay(RETRY_MS);
+          res = await ask();
+        }
+      } catch (e) {
+        dbg(`fetch ${what}: network error — ${e.message}`);
+        continue;
+      }
+      if (res.status === 429) {
+        throttledUntil = performance.now() + THROTTLE_MS;
+        // Survives a page reload on purpose: without it every Ctrl+Shift+R
+        // spends two more requests on a quota that is already refusing us,
+        // which is how a short cool-off turns into a long one.
+        try { chrome.storage.local.set({ [THROTTLE_KEY]: Date.now() + THROTTLE_MS }); } catch (_) {}
+        dbg(`fetch ${what}: HTTP 429 again — backing off for ${THROTTLE_MS / 1000}s`);
+        return [];
+      }
+      // A refusal is about the request, not the format: asking again with a
+      // different fmt only spends another slice of the same quota.
+      if (!res.ok) { dbg(`fetch ${what}: HTTP ${res.status}`); return []; }
       const body = (await res.text()).trim();
-      if (!body) continue;
-      const units = parseUnits(body);
+      const units = body ? parseUnits(body) : [];
+      dbg(`fetch ${what}: HTTP ${res.status}, ${body.length} bytes → ${units.length} units`);
       if (units.length) return units;
     }
     return [];
+  }
+
+  // ---------- translation cache ----------
+  // Captions of a published video never change, so a translation is worth
+  // keeping: a cached one costs no request at all, and requests are exactly
+  // what ran us into HTTP 429. The source track is never cached — the player's
+  // own interception hands us its body for free on every load.
+  const CACHE_V = 1;          // bump if the shape of a unit ever changes
+  const CACHE_KEEP = 10;      // tracks kept on disk (~5 videos, ~200 KB each)
+  const CACHE_IDX = 'ytdscap-idx';
+  const memCache = new Map(); // same, for this page's life: instant relanguaging
+  const cacheKey = (lang) => `ytdscap:${CACHE_V}:${currentVideoId}:${lang}`;
+
+  async function cachedUnits(lang) {
+    const memo = memCache.get(cacheKey(lang));
+    if (memo) return memo;
+    try {
+      const key = cacheKey(lang);
+      const got = await chrome.storage.local.get(key);
+      const units = got && got[key];
+      if (units && units.length) { memCache.set(key, units); return units; }
+    } catch (_) {}
+    return null;
+  }
+
+  async function cacheUnits(lang, units) {
+    const key = cacheKey(lang);
+    memCache.set(key, units);
+    try {
+      const got = await chrome.storage.local.get(CACHE_IDX);
+      const idx = [key, ...(got[CACHE_IDX] || []).filter((k) => k !== key)];
+      const drop = idx.splice(CACHE_KEEP);   // oldest fall off the end
+      await chrome.storage.local.set({ [key]: units, [CACHE_IDX]: idx });
+      if (drop.length) await chrome.storage.local.remove(drop);
+    } catch (e) {
+      dbg('translation cache write failed: ' + e.message);
+    }
+  }
+
+  async function translationUnits(base, lang) {
+    const hit = await cachedUnits(lang);
+    if (hit) { dbg(`translation ${lang}: from cache (${hit.length} units)`); return hit; }
+    let units = [];
+    try { units = await fetchUnits(base, lang); } catch (_) {}
+    if (units.length) cacheUnits(lang, units);
+    return units;
   }
 
   function parseUnits(body) {
@@ -614,8 +706,13 @@
 
   async function buildFromBase(base, body, capTlang) {
     let enUnits = [];
-    try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
-    if (!enUnits.length && !capTlang && body) enUnits = parseUnits(body);
+    // The interception already handed us this body. Fetching the same half
+    // megabyte again on every load is what spent our quota — so the network is
+    // the fallback here, not the first move.
+    if (!capTlang && body) enUnits = parseUnits(body);
+    if (!enUnits.length) {
+      try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
+    }
     if (!enUnits.length) return false;
     enUnits = splitUnitsByPunct(enUnits);
 
@@ -629,11 +726,17 @@
       uaUnits = enUnits;
     } else if (capTlang === state.targetLang && body) {
       uaUnits = parseUnits(body);
-      if (!uaUnits.length) { try { uaUnits = await fetchUnits(base, state.targetLang); } catch (_) {} }
+      if (uaUnits.length) cacheUnits(state.targetLang, uaUnits);
+      else uaUnits = await translationUnits(base, state.targetLang);
     } else {
-      try { uaUnits = await fetchUnits(base, state.targetLang); } catch (_) { uaUnits = []; }
+      uaUnits = await translationUnits(base, state.targetLang);
     }
     if (!sameLang) uaUnits = splitUnitsByPunct(uaUnits);
+    if (!sameLang && !uaUnits.length) {
+      showHint(throttledUntil > performance.now()
+        ? 'YouTube is rate-limiting caption requests — the translation will come back in a few minutes'
+        : 'Translation did not load — pick the language again', 4500);
+    }
 
     enLines = groupUnitsToLines(enUnits);
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
@@ -1015,7 +1118,7 @@
     // watches for pointer movement is affected.
     panel.addEventListener('mousemove', (e) => { ptr = { x: e.clientX, y: e.clientY }; wake(e); });
     panel.addEventListener('click', wake);
-    elHint = el('div', 'ytds-hint', 'Move the mouse to bring the controls back');
+    elHint = el('div', 'ytds-hint');
     panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer(), elHint);
     syncUi();
     return true;
@@ -1041,7 +1144,7 @@
     elCounter = el('div', 'ytds-counter');
 
     btnFocus = mkBtn('ytds-icon ytds-focus-btn', 'Focus mode: hide everything but the text (move the mouse to bring it back)',
-      () => { toggleKey('focus'); if (state.focus) showHint(); }, icon('eye'));
+      () => { toggleKey('focus'); if (state.focus) showHint('Move the mouse to bring the controls back'); }, icon('eye'));
     btnFocus.dataset.key = 'focus';
 
     const right = el('div', 'ytds-top-side ytds-right');
@@ -1322,13 +1425,15 @@
     panel.classList.remove('ytds-awake');
   }
 
-  // Hiding the whole interface is not self-explanatory the first time, and the
-  // way back least of all — so the mode says it out loud, once, as it goes.
-  function showHint() {
+  // A line that says itself and leaves. Used where silence would read as a
+  // bug: focus mode hiding the whole interface (and the way back with it), or
+  // a translation that never arrived.
+  function showHint(msg, ms = 2200) {
     if (!elHint) return;
+    elHint.textContent = msg;
     elHint.classList.add('ytds-hint-on');
     clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => elHint.classList.remove('ytds-hint-on'), 2200);
+    hintTimer = setTimeout(() => elHint.classList.remove('ytds-hint-on'), ms);
   }
 
   function applyLayout() {
