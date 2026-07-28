@@ -306,6 +306,12 @@
 .ytds-sbtn svg { width: calc(1.5 * var(--u)); height: calc(1.5 * var(--u)); }
 .ytds-sbtn.ytds-prev { padding-left: calc(1.1 * var(--u)); }
 .ytds-sbtn.ytds-next { padding-right: calc(1.1 * var(--u)); }
+/* "Previous" is a wider word than "Next", and that pushed the hero pill a full
+   unit right of the tray's centre. Both sides take the width of the wider one,
+   so the pill sits on the centre and the tray reads as two equal halves. A
+   label longer than the minimum simply grows past it — nothing clips. */
+.ytds-sbtn.ytds-prev,
+.ytds-sbtn.ytds-next { min-width: calc(9.2 * var(--u)); justify-content: center; }
 
 /* Repeat is the hero of the row: taller and filled. It is an action, not a
    mode — no on/off state, one press replays the sentence. */
