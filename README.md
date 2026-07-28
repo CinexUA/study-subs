@@ -3,8 +3,8 @@
 A Google Chrome extension that pulls YouTube subtitles into a **full-screen
 study mode**: top row — original (EN) anchored to a fixed reading line, bottom
 row — translation (UA). The goal is learning English: you see the original and
-instantly the translation, one sentence at a time, plus shadowing controls to
-repeat each sentence out loud.
+instantly the translation, plus a study mode that walks sentence by sentence
+so you can repeat each one out loud.
 
 ## Installing in developer mode (dev / unpacked)
 
@@ -39,16 +39,17 @@ when you want to study — click that button → a **full-screen study mode** op
   fixed screen midline, translation below it. The English line is "anchored"
   to that line and **never jumps** regardless of sentence length.
 - **Word-by-word reveal** of subtitles, like on YouTube (by each word's
-  timecode), one sentence at a time.
+  timecode): the previous line stays above, dimmed.
 - **Custom playback controls**: ±10 s, pause/play, **speed** (0.5×–2×), time,
   and a scrubber whose notches are sentence boundaries — clicking it snaps to
   the start of the sentence under the cursor.
 - **Shadowing row**: **Попереднє · Повторити · Наступне**. "Повторити" is a
   toggle — while it's on, the current sentence replays in a loop (with a short
   pause each time, so you can repeat it aloud).
-- **Auto-pause at the end of a sentence** (settings → Відтворення): the video
-  plays one sentence — from its start to the period — and stops. Turn it off
-  and the same overlay just follows free playback.
+- **Study mode ("Навчання" button in the top bar, also in settings)**: the
+  overlay switches to one sentence at a time and the video stops at the end of
+  each sentence, with the shadowing row underneath. Off — free playback with
+  the rolling two-line transcript.
 - **Settings drawer** (⚙ in the top bar): subtitle rows on/off, translation
   language (uk, en, pl, de, es, fr, it, ru), size (XS…XL), speed, auto-pause,
   theme (Sepia / Dark / Light), and the diagnostics log.
@@ -94,7 +95,7 @@ with a "Скопіювати лог" button. Key lines:
   sees (`0` = the video has no YouTube captions).
 - `intercepted timedtext (…, body=… bytes)` — the player made a captions
   request and whether the body was non-empty.
-- `ready: EN N words · M sentences · UK K words` — what was loaded.
+- `ready: EN N words / L lines · M sentences · UK K words` — what was loaded.
 - `using cached valid URL` — the cache kicked in (e.g. on language switch).
 
 ## Limitations

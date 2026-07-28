@@ -39,10 +39,13 @@
     close: S + '<path d="M5.8 5.8 14.2 14.2M14.2 5.8 5.8 14.2"/></svg>',
     settings: S + '<path d="M3.6 6.6h2.1M10.4 6.6h6M3.6 13.4h6.9M15.1 13.4h1.3"/><circle cx="8.1" cy="6.6" r="2.3"/><circle cx="12.8" cy="13.4" r="2.3"/></svg>',
     check: S + '<path d="M4.8 10.5 8.2 13.9 15.2 6.5"/></svg>',
+    study: S + '<path d="M4 15.4V6.1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9.3"/><path d="M4 15.4a2 2 0 0 1 2-1.9h10"/><path d="M10 4.1v9.4"/></svg>',
     console: S + '<rect x="3.2" y="4.4" width="13.6" height="11.2" rx="2.6"/><path d="M6.6 8.6 8.9 10.9l-2.3 2.3M11.2 13.2h3.1"/></svg>'
   };
 
   let state = { ...DEFAULTS };
+  let enLines = [];      // free-reading mode: captions grouped into lines
+  let uaLines = [];
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
@@ -51,7 +54,8 @@
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elStage, elEn, elUa, elNote, elStatus, elLog, elCounter;
+  let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter;
+  let btnStudy;
   let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub;
   let btnLoop;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
@@ -89,8 +93,7 @@
 
   const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
   const clearDisplay = () => {
-    if (elEn) elEn.textContent = '';
-    if (elUa) elUa.textContent = '';
+    if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     lastSig = null; lastIdx = -1;
   };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -236,6 +239,44 @@
       }
     }
     return out;
+  }
+
+  // Free-reading mode groups words into readable lines: a line closes on a
+  // sentence end once it is long enough, or when it gets too long / too slow.
+  function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
+    const lines = [];
+    let cur = null;
+    const flush = () => {
+      if (cur && cur.units.length) {
+        cur.full = joinUnits(cur.units);
+        cur.end = cur.units[cur.units.length - 1].t;
+        lines.push(cur);
+      }
+      cur = null;
+    };
+    for (const u of units) {
+      if (!cur) cur = { start: u.t, units: [] };
+      cur.units.push(u);
+      const buf = joinUnits(cur.units);
+      if ((endsSentence(buf) && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
+    }
+    flush();
+    return lines;
+  }
+
+  // The line playing at time t, and how many of its words are already spoken.
+  function pickLine(lines, t) {
+    if (!lines.length) return { idx: -1, n: 0 };
+    let lo = 0, hi = lines.length - 1, idx = -1;
+    while (lo <= hi) {
+      const m = (lo + hi) >> 1;
+      if (lines[m].start <= t) { idx = m; lo = m + 1; }
+      else hi = m - 1;
+    }
+    if (idx < 0) return { idx: -1, n: 0 };
+    let n = 0;
+    for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
+    return { idx, n: Math.max(1, n) };
   }
 
   // Split word units into sentences (period/!/?/… ends one; a long silence
@@ -394,7 +435,10 @@
   function setStudy(on) {
     state.study = on; saveState();
     if (on) armStudy();
-    else if (!state.loop) { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
+    else { // free play again — and the loop has nothing to hang on either
+      state.loop = false;
+      stopAt = null; clearTimeout(stopTimer); stopTimer = null;
+    }
     syncUi();
   }
 
@@ -415,7 +459,7 @@
   function updateStatus() {
     const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · translation unavailable' : '';
     const srcU = (srcLang || 'en').toUpperCase();
-    setStatus(`source: ${srcLang || '?'} · ${srcU} ${enUnitLen} words · ${state.targetLang.toUpperCase()} ${uaUnitLen} words · ${sentences.length} sentences${uaNote}`);
+    setStatus(`source: ${srcLang || '?'} · ${srcU} ${enUnitLen} words · ${state.targetLang.toUpperCase()} ${uaUnitLen} words · ${enLines.length} lines · ${sentences.length} sentences${uaNote}`);
     updateLabels();
     updateCounter();
   }
@@ -449,19 +493,21 @@
     }
     if (!sameLang) uaUnits = splitUnitsByPunct(uaUnits);
 
+    enLines = groupUnitsToLines(enUnits);
+    uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
     sentences = buildSentences(enUnits);
     uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
     sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
-    dbg(`ready: EN ${enUnits.length} words · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
+    dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
     updateStatus();
-    if (state.reader) armStudy();
+    if (state.reader && state.study) armStudy();
     return true;
   }
 
   async function loadCaptions() {
-    srcLang = ''; enUnitLen = uaUnitLen = 0;
+    enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
@@ -491,7 +537,7 @@
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (awaitingCapture && !sentences.length) {
+      if (awaitingCapture && !enLines.length) {
         awaitingCapture = false;
         dbg('9s timeout: no capture happened — the video likely has no captions');
         setStatus('could not fetch captions — enable CC in the player manually');
@@ -500,7 +546,7 @@
   }
 
   async function handleCaptured(url, body) {
-    if (sentences.length) return;
+    if (enLines.length) return;
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
 
@@ -524,37 +570,49 @@
   });
 
   // ---------- render loop (only while reading) ----------
-  // One sentence at a time: EN and the translation are index-aligned, so the
-  // next sentence's words can never bleed across the two tracks.
   function loop() {
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
     // The precise stop timer does the real work; this is a backup.
     if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
-    if (!video || !sentences.length) { showPlaceholder(); return; }
+    if (!video || (!sentences.length && !enLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
 
-    // Playing with no stop armed = free play or a resume outside our
-    // controls — follow the audio instead of freezing on a stale sentence.
-    if (!video.paused && stopAt == null) {
-      const i = findSentenceAt(t);
-      if (i !== sentIdx) { sentIdx = i; lastSig = null; }
+    // Study mode: one sentence at a time, EN and the translation index-aligned,
+    // so the next sentence's words can never bleed across the two tracks.
+    if (state.study && sentences.length) {
+      // Playing with no stop armed = a resume outside our controls — follow
+      // the audio instead of freezing on a stale sentence.
+      if (!video.paused && stopAt == null) {
+        const i = findSentenceAt(t);
+        if (i !== sentIdx) { sentIdx = i; lastSig = null; }
+      }
+      const enS = sentences[sentIdx];
+      const uaS = uaSentences[sentIdx];
+      const enN = revealCount(enS, t);
+      const uaN = uaRevealCount(enS, uaS, t);
+      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+      if (sig === lastSig) return;
+      const fresh = sentIdx !== lastIdx;
+      lastSig = sig; lastIdx = sentIdx;
+      renderStudy(enS, uaS, enN, uaN, fresh);
+      if (fresh) updateCounter();
+      return;
     }
-    const enS = sentences[sentIdx];
-    const uaS = uaSentences[sentIdx];
-    const enN = revealCount(enS, t);
-    const uaN = uaRevealCount(enS, uaS, t);
-    const sig = `${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+
+    // Free reading: the rolling transcript — previous line dimmed above the
+    // current one, which fills in word by word.
+    const en = pickLine(enLines, t);
+    const ua = pickLine(uaLines, t);
+    const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
     if (sig === lastSig) return;
-    const fresh = sentIdx !== lastIdx;
-    lastSig = sig; lastIdx = sentIdx;
-    render(
-      enS ? joinUnits(enS.units.slice(0, enN)) : '',
-      uaS ? joinUnits(uaS.units.slice(0, uaN)) : '',
-      fresh
-    );
-    if (fresh) updateCounter();
+    const fresh = en.idx !== lastIdx;
+    lastSig = sig; lastIdx = en.idx;
+    renderLines(en, ua, fresh);
+    // Keep the counter (and the sentence the shadowing row would resume from)
+    // honest even while we are not driving playback.
+    if (fresh && sentences.length) { sentIdx = findSentenceAt(t); updateCounter(); }
   }
 
   // How many EN words of a sentence should be visible at time t.
@@ -576,25 +634,48 @@
 
   // Two fixed zones split by the hairline: EN sits just ABOVE it (grows
   // upward, its baseline never moves), the translation just below.
-  function render(enText, uaText, fresh) {
-    if (!elEn) return;
-    if (elNote) elNote.style.display = 'none';
-    elEn.textContent = state.showEn ? enText : '';
-    elUa.textContent = state.showUa ? uaText : '';
-    if (!fresh) return;
-    for (const node of [elEn, elUa]) {
-      node.classList.remove('ytds-fresh');
-      void node.offsetWidth;    // restart the entrance animation
-      node.classList.add('ytds-fresh');
+  function renderStudy(enS, uaS, enN, uaN, fresh) {
+    if (!elZoneEn) return;
+    hideNote();
+    paint(elZoneEn, 'ytds-en', state.showEn && enS ? [{ text: joinUnits(enS.units.slice(0, enN)), fresh }] : []);
+    paint(elZoneUa, 'ytds-ua', state.showUa && uaS ? [{ text: joinUnits(uaS.units.slice(0, uaN)), fresh }] : []);
+  }
+
+  function renderLines(en, ua, fresh) {
+    if (!elZoneEn) return;
+    hideNote();
+    paint(elZoneEn, 'ytds-en', state.showEn ? lineItems(enLines, en, fresh) : []);
+    paint(elZoneUa, 'ytds-ua', state.showUa ? lineItems(uaLines, ua, fresh) : []);
+  }
+
+  // The previous line (dimmed) plus the current one, revealed word by word.
+  function lineItems(lines, sel, fresh) {
+    if (sel.idx < 0) return [];
+    const items = [];
+    if (sel.idx > 0) items.push({ text: lines[sel.idx - 1].full, dim: true });
+    items.push({ text: joinUnits(lines[sel.idx].units.slice(0, sel.n)), fresh });
+    return items;
+  }
+
+  // `fresh` only on a new line/sentence: the node is rebuilt on every word, so
+  // carrying the class over would replay the entrance animation each time.
+  function paint(zone, cls, items) {
+    zone.textContent = '';
+    for (const it of items) {
+      const block = el('div', 'ytds-block' + (it.dim ? '' : ' ytds-active') + (it.fresh ? ' ytds-fresh' : ''));
+      block.appendChild(el('span', 'ytds-line ' + cls, it.text));
+      zone.appendChild(block);
     }
   }
+
+  function hideNote() { if (elNote && elNote.style.display !== 'none') elNote.style.display = 'none'; }
 
   // Shown in reader when there are no captions yet: surfaces the status/error.
   function showPlaceholder() {
     if (!elNote) return;
     const msg = (elStatus && elStatus.textContent) || 'завантажую субтитри…';
     if (elNote.style.display !== 'none' && elNote.textContent === msg) return;
-    elEn.textContent = ''; elUa.textContent = '';
+    if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     elNote.style.display = '';
     elNote.textContent = msg;
   }
@@ -757,8 +838,12 @@
     bUa.dataset.key = 'showUa';
     segLang.append(bEn, bUa);
 
+    btnStudy = mkBtn('ytds-pill ytds-pill-text', 'Режим навчання: речення за реченням, зупинка на крапці',
+      () => setStudy(!state.study), icon('study'), el('span', null, 'Навчання'));
+    btnStudy.dataset.key = 'study';
+
     const left = el('div', 'ytds-top-side');
-    left.append(segLang, mkFontSeg());
+    left.append(segLang, mkFontSeg(), btnStudy);
 
     elCounter = el('div', 'ytds-counter');
 
@@ -774,17 +859,13 @@
   }
 
   function buildStage() {
-    const zEn = el('div', 'ytds-zone ytds-zone-en');
-    elEn = el('span', 'ytds-line ytds-en');
-    zEn.appendChild(elEn);
-    const zUa = el('div', 'ytds-zone ytds-zone-ua');
-    elUa = el('span', 'ytds-line ytds-ua');
-    zUa.appendChild(elUa);
+    elZoneEn = el('div', 'ytds-zone ytds-zone-en');
+    elZoneUa = el('div', 'ytds-zone ytds-zone-ua');
     elNote = el('div', 'ytds-note');
     elNote.style.display = 'none';
 
     elStage = el('div', 'ytds-stage');
-    elStage.append(zEn, el('div', 'ytds-rule'), zUa, elNote);
+    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote);
     return elStage;
   }
 
@@ -964,6 +1045,7 @@
   // ---------- syncing UI to state ----------
   function syncUi() {
     if (!panel) return;
+    applyTheme();   // also carries the study/drawer state classes
     panel.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('ytds-on', !!state[b.dataset.key]));
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
     const step = FONT_STEPS[fontStepIdx()][0];
@@ -997,7 +1079,9 @@
 
   function applyTheme() {
     if (!panel) return;
-    panel.className = 'ytds-panel ytds-theme-' + state.theme + (drawerIsOpen() ? ' ytds-drawer-open' : '');
+    panel.className = 'ytds-panel ytds-theme-' + state.theme
+      + (state.study ? ' ytds-study' : '')
+      + (drawerIsOpen() ? ' ytds-drawer-open' : '');
   }
 
   function applyLayout() {

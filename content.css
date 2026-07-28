@@ -216,12 +216,18 @@
 .ytds-zone {
   min-height: 2.56em;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(.5 * var(--u));
   text-align: center;
   overflow: hidden;
 }
-.ytds-zone-en { align-items: flex-end; }
-.ytds-zone-ua { align-items: flex-start; }
+.ytds-zone-en { justify-content: flex-end; }
+.ytds-zone-ua { justify-content: flex-start; }
+
+/* Free-reading mode stacks two lines per zone: the previous one is dimmed. */
+.ytds-block { opacity: .4; transition: opacity var(--d3) var(--ease-out); }
+.ytds-block.ytds-active { opacity: 1; }
 .ytds-rule {
   height: 1px;
   margin: calc(2.2 * var(--u)) 0;
@@ -247,6 +253,7 @@
 }
 .ytds-fresh { animation: ytds-sub-in 420ms var(--ease-out) both; }
 .ytds-zone-ua .ytds-fresh { animation-delay: 60ms; }
+.ytds-block.ytds-fresh { animation-fill-mode: backwards; }
 .ytds-note {
   font: 400 calc(1.4 * var(--u)) / 1.4 var(--sans);
   color: var(--ink-3);
@@ -254,7 +261,9 @@
 }
 
 /* ---------- Shadowing row: previous · repeat · next ---------- */
-.ytds-study-row {
+/* Shadowing only makes sense while the video stops at each sentence. */
+.ytds-study-row { display: none; }
+.ytds-panel.ytds-study .ytds-study-row {
   display: flex;
   justify-content: center;
   padding: 0 calc(2.4 * var(--u)) calc(1.6 * var(--u));
@@ -359,7 +368,15 @@
   box-shadow: var(--e2);
   transition: transform var(--d2) var(--ease-out), box-shadow var(--d2) var(--ease-out);
 }
+.ytds-pill-text { font-family: var(--sans); font-size: calc(1.15 * var(--u)); }
+.ytds-pill.ytds-on {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: var(--accent-face);
+  color: var(--accent-ink);
+}
 .ytds-pill:hover { transform: translateY(-1px); box-shadow: var(--e3); }
+.ytds-pill.ytds-on:hover { box-shadow: var(--e3), var(--ring); }
 .ytds-pill:active { transform: translateY(1px); box-shadow: var(--press); }
 .ytds-pill svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); opacity: .5; }
 
