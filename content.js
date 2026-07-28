@@ -676,16 +676,24 @@
     lastSig = null; lastCtl = '';
   }
 
-  // Precise stop: a timer scheduled for the exact remaining time. rAF alone
+  // Precise stop: a timer scheduled for the remaining time. rAF alone
   // overshoots by a frame (16–33+ ms, worse at 2×) and freezes in background
   // tabs; the rAF check in loop() stays only as a backup.
+  //
+  // The timer aims a touch EARLY on purpose. A setTimeout can only ever be
+  // late, and on a watch page it has been measured 205 ms late (night 10).
+  // Landing before the mark costs nothing — the branch below re-arms, and by
+  // then the remaining stretch is short enough for the rAF backup to close.
+  const STOP_LEAD = 0.04;
   function armStop() {
     clearTimeout(stopTimer); stopTimer = null;
     if (stopAt == null || !video || video.paused) return;
-    const ms = Math.max(0, (stopAt - video.currentTime) / (video.playbackRate || 1)) * 1000;
-    stopTimer = setTimeout(hitStop, ms);
+    const left = (stopAt - video.currentTime) / (video.playbackRate || 1);
+    // Inside the lead there is nothing left to aim early with: aim at the mark.
+    const ms = Math.max(0, left > STOP_LEAD ? left - STOP_LEAD : left) * 1000;
+    stopTimer = setTimeout(() => hitStop('timer'), ms);
   }
-  function hitStop() {
+  function hitStop(who) {
     clearTimeout(stopTimer); stopTimer = null;
     if (stopAt == null || !video || video.paused) return;
     if (video.currentTime < stopAt - 0.005) { armStop(); return; } // fired early (seek lag / buffering)
@@ -696,8 +704,10 @@
     const over = video.currentTime - stopAt;
     // Tells apart the two ways a stop can be late: a boundary placed too close
     // to the next word (fix that in buildSentences) or a timer that simply
-    // fired behind schedule (fix that here).
-    if (over > 0.05) dbg(`sentence stop overshot by ${Math.round(over * 1000)} ms`);
+    // fired behind schedule (fix that here). Which of the two fired is the
+    // thing to read: the rAF backup can only be a frame late, so if it is the
+    // one reporting 200 ms, the main thread was blocked and no schedule helps.
+    if (over > 0.05) dbg(`sentence stop overshot by ${Math.round(over * 1000)} ms (${who})`);
     if (over > 0.005 && over < 0.8) {
       suppressSeek = true; // our own correction — not a user seek
       try { video.currentTime = stopAt; } catch (_) { suppressSeek = false; }
@@ -706,14 +716,26 @@
     lastCtl = '';
   }
 
+  // The stop belonging to the sentence we are in — or null when the playhead is
+  // already past it. That happens in exactly one place: the tail of the video,
+  // after the last sentence, where findSentenceAt has nothing further to offer
+  // and hands back the last one. Arming its stop there puts the mark in the
+  // PAST, and playback dies the instant it starts.
+  function liveStop(t) {
+    if (!stopping() || !sentences.length) return null;
+    const s = sentences[sentIdx];
+    return t >= s.stop - SENT_EPS ? null : s.stop;
+  }
+
   // After any user seek or a resume outside our controls, the text must show
   // the sentence the audio is actually in — otherwise audio walks away while
   // the display stays frozen on a stale sentence.
   function resync() {
     if (!state.reader || !sentences.length || !video) return;
-    const i = findSentenceAt(video.currentTime || 0);
+    const t = video.currentTime || 0;
+    const i = findSentenceAt(t);
     if (i !== sentIdx) { sentIdx = i; lastSig = null; }
-    stopAt = stopping() ? sentences[sentIdx].stop : null;
+    stopAt = liveStop(t);
     sentenceDone = false;   // the playhead moved: nothing is waiting to be replayed
     armStop();
   }
@@ -726,8 +748,9 @@
   // Begin shadowing at whatever sentence the playhead is currently in.
   function armStudy() {
     if (!video || !sentences.length) return;
-    sentIdx = findSentenceAt(video.currentTime || 0);
-    stopAt = stopping() ? sentences[sentIdx].stop : null;
+    const t = video.currentTime || 0;
+    sentIdx = findSentenceAt(t);
+    stopAt = liveStop(t);
     sentenceDone = false;
     armStop();
     lastSig = null;
@@ -988,7 +1011,7 @@
     updateControls();
     guardPause();
     // The precise stop timer does the real work; this is a backup.
-    if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
+    if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop('rAF backup');
     if (!video || (!sentences.length && !enLines.length)) { showPlaceholder(); return; }
     const t = video.currentTime;
 
