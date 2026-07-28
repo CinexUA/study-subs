@@ -7,11 +7,11 @@
 
   const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true };
   const LANGS = [
-    ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
-    ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
-    ['it', 'Italiano'], ['ru', 'Русская']
+    ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
+    ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
+    ['it', 'Italian'], ['ru', 'Russian']
   ];
-  const THEMES = [['sepia', 'Книжкова'], ['dark', 'Нічна'], ['light', 'Денна']];
+  const THEMES = [['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light']];
   const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
   // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
   const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
@@ -657,7 +657,7 @@
   // Shown in reader when there are no captions yet: surfaces the status/error.
   function showPlaceholder() {
     if (!elNote) return;
-    const msg = (elStatus && elStatus.textContent) || 'завантажую субтитри…';
+    const msg = (elStatus && elStatus.textContent) || 'loading captions…';
     if (elNote.style.display !== 'none' && elNote.textContent === msg) return;
     if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     elNote.style.display = '';
@@ -752,9 +752,9 @@
   function mkFontSeg() {
     const seg = el('div', 'ytds-seg');
     seg.append(
-      mkBtn('ytds-step', 'Менший шрифт', () => changeFont(-1), txt('A')),
+      mkBtn('ytds-step', 'Smaller text', () => changeFont(-1), txt('A')),
       el('span', 'ytds-step-label'),
-      mkBtn('ytds-step ytds-step-lg', 'Більший шрифт', () => changeFont(1), txt('A'))
+      mkBtn('ytds-step ytds-step-lg', 'Larger text', () => changeFont(1), txt('A'))
     );
     return seg;
   }
@@ -816,14 +816,14 @@
 
   function buildTop() {
     const segLang = el('div', 'ytds-seg');
-    const bEn = mkBtn('', 'Показувати оригінал', () => toggleKey('showEn'), txt('EN'));
+    const bEn = mkBtn('', 'Show the original line', () => toggleKey('showEn'), txt('EN'));
     bEn.dataset.key = 'showEn';
-    const bUa = mkBtn('', 'Показувати переклад', () => toggleKey('showUa'), txt('UK'));
+    const bUa = mkBtn('', 'Show the translation line', () => toggleKey('showUa'), txt('UK'));
     bUa.dataset.key = 'showUa';
     segLang.append(bEn, bUa);
 
-    btnStudy = mkBtn('ytds-pill ytds-pill-text', 'Режим навчання: речення за реченням, зупинка на крапці',
-      () => setStudy(!state.study), icon('study'), el('span', null, 'Навчання'));
+    btnStudy = mkBtn('ytds-pill ytds-pill-text', 'Study mode: one sentence at a time, stops at each period',
+      () => setStudy(!state.study), icon('study'), el('span', null, 'Study'));
     btnStudy.dataset.key = 'study';
 
     const left = el('div', 'ytds-top-side');
@@ -833,8 +833,8 @@
 
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
-      mkBtn('ytds-icon ytds-gear', 'Налаштування', openDrawer, icon('settings')),
-      mkBtn('ytds-icon', 'Вийти (Esc)', exitReader, icon('close'))
+      mkBtn('ytds-icon ytds-gear', 'Settings', openDrawer, icon('settings')),
+      mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))
     );
 
     const top = el('div', 'ytds-top');
@@ -857,9 +857,9 @@
   function buildStudyRow() {
     const tray = el('div', 'ytds-study-tray');
     tray.append(
-      mkBtn('ytds-sbtn ytds-prev', 'Попереднє речення (←)', () => playSentence(sentIdx - 1), icon('chevL'), el('span', null, 'Попереднє')),
-      mkBtn('ytds-sbtn ytds-primary', 'Повторити це речення (R)', repeatSentence, icon('repeat'), el('span', null, 'Повторити')),
-      mkBtn('ytds-sbtn ytds-next', 'Наступне речення (→)', () => playSentence(sentIdx + 1), el('span', null, 'Наступне'), icon('chevR'))
+      mkBtn('ytds-sbtn ytds-prev', 'Previous sentence (←)', () => playSentence(sentIdx - 1), icon('chevL'), el('span', null, 'Previous')),
+      mkBtn('ytds-sbtn ytds-primary', 'Repeat this sentence (R)', repeatSentence, icon('repeat'), el('span', null, 'Repeat')),
+      mkBtn('ytds-sbtn ytds-next', 'Next sentence (→)', () => playSentence(sentIdx + 1), el('span', null, 'Next'), icon('chevR'))
     );
     const row = el('div', 'ytds-study-row');
     row.appendChild(tray);
@@ -868,14 +868,14 @@
 
   function buildControls() {
     const seek = (d) => { if (video && video.duration) video.currentTime = clamp(video.currentTime + d, 0, video.duration); };
-    elPlay = mkBtn('ytds-icon ytds-play', 'Пауза / відтворення', togglePlay, icon('play'));
+    elPlay = mkBtn('ytds-icon ytds-play', 'Pause / play', togglePlay, icon('play'));
     elTime = el('div', 'ytds-time', '0:00 / 0:00');
 
     elControls = el('div', 'ytds-controls');
     elControls.append(
-      mkBtn('ytds-icon', 'Назад 10 с', () => seek(-10), icon('rewind')),
+      mkBtn('ytds-icon', 'Back 10s', () => seek(-10), icon('rewind')),
       elPlay,
-      mkBtn('ytds-icon', 'Вперед 10 с', () => seek(10), icon('forward')),
+      mkBtn('ytds-icon', 'Forward 10s', () => seek(10), icon('forward')),
       mkSpeedMenu(false),
       elTime,
       buildScrub()
@@ -885,7 +885,7 @@
 
   function mkSpeedMenu(below) {
     return mkMenu({
-      title: 'Швидкість відтворення',
+      title: 'Playback speed',
       below,
       items: SPEEDS.map((v) => [v, v + '×']),
       get: () => state.speed || 1,
@@ -946,7 +946,7 @@
     scrim.addEventListener('click', closeDrawer);
 
     const head = el('div', 'ytds-drawer-head');
-    head.append(el('span', null, 'Налаштування'), mkBtn('', 'Закрити', closeDrawer, icon('close')));
+    head.append(el('span', null, 'Settings'), mkBtn('', 'Close', closeDrawer, icon('close')));
 
     const row = (title, control, hint) => {
       const left = el('div');
@@ -968,36 +968,36 @@
 
     const body = el('div', 'ytds-drawer-body');
     body.append(
-      group('Субтитри'),
-      row('Англійський рядок', mkToggle('showEn')),
-      row('Рядок перекладу', mkToggle('showUa')),
-      row('Мова перекладу', mkMenu({
-        title: 'Мова перекладу',
+      group('Subtitles'),
+      row('Original line', mkToggle('showEn')),
+      row('Translation line', mkToggle('showUa')),
+      row('Translation language', mkMenu({
+        title: 'Translation language',
         below: true, text: true,
         items: LANGS,
         get: () => state.targetLang,
         label: (v) => (LANGS.find((l) => l[0] === v) || [v, v])[1],
         pick: (v) => { state.targetLang = v; saveState(); loadCaptions(); }
       })),
-      row('Розмір', mkFontSeg()),
+      row('Size', mkFontSeg()),
 
-      group('Відтворення'),
-      row('Швидкість', mkSpeedMenu(true)),
-      row('Пауза в кінці речення', mkToggle('study', setStudy), 'Дає секунду, щоб повторити вголос'),
+      group('Playback'),
+      row('Speed', mkSpeedMenu(true)),
+      row('Pause at the end of a sentence', mkToggle('study', setStudy), 'Gives you a second to repeat it out loud'),
 
-      group('Вигляд'),
-      row('Тема', buildSwatches()),
+      group('Appearance'),
+      row('Theme', buildSwatches()),
 
       group('Advanced', 'console'),
       elStatus,
       elLog,
       mkBtn('ytds-text-btn', '', () => {
         navigator.clipboard.writeText(elLog.textContent || '').catch(() => {});
-      }, txt('Скопіювати лог'))
+      }, txt('Copy log'))
     );
 
     const keys = el('div', 'ytds-keys');
-    for (const [k, t] of [['R', 'повтор'], ['←→', 'речення'], ['Esc', 'вихід']]) {
+    for (const [k, t] of [['R', 'repeat'], ['←→', 'sentences'], ['Esc', 'exit']]) {
       const s = el('span');
       s.append(el('b', null, k), txt(' ' + t));
       keys.appendChild(s);
@@ -1049,7 +1049,7 @@
   function updateCounter() {
     if (!elCounter) return;
     elCounter.textContent = sentences.length
-      ? `Речення ${Math.min(sentIdx + 1, sentences.length)} / ${sentences.length}`
+      ? `Sentence ${Math.min(sentIdx + 1, sentences.length)} / ${sentences.length}`
       : '';
   }
 
@@ -1118,7 +1118,7 @@
       if (!sentences.length) return;
       e.preventDefault(); e.stopPropagation();
       playSentence(sentIdx + (key === 'ArrowRight' ? 1 : -1));
-    } else if (key === 'r' || key === 'R' || key === 'к' || key === 'К') {
+    } else if (e.code === 'KeyR') {   // by physical key: layout-independent
       if (!sentences.length) return;
       e.preventDefault(); e.stopPropagation();
       repeatSentence();

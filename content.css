@@ -1,6 +1,6 @@
 /* ---------- YT Dual Subs — design language v1 ----------
    Ported from designs/v1.0 (Claude Design bundle, "YT Dual Subs — Design
-   Language v1"), layout (b) "Повноекранний режим навчання".
+   Language v1"), layout (b) — the full-screen study mode.
 
    Geometry, motion and elevation are shared by all themes; a theme
    redefines only the 16 tone tokens below. Sizes inside the overlay are

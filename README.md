@@ -43,9 +43,9 @@ when you want to study — click that button → a **full-screen study mode** op
 - **Custom playback controls**: ±10 s, pause/play, **speed** (0.5×–2×), time,
   and a scrubber whose notches are sentence boundaries — clicking it snaps to
   the start of the sentence under the cursor.
-- **Shadowing row**: **Попереднє · Повторити · Наступне**. "Повторити" is a
-  plain action — one press replays the current sentence from its start.
-- **Study mode ("Навчання" button in the top bar, also in settings)**: the
+- **Shadowing row**: **Previous · Repeat · Next**. "Repeat" is a plain action —
+  one press replays the current sentence from its start.
+- **Study mode ("Study" button in the top bar, also in settings)**: the
   overlay switches to one sentence at a time and the video stops at the end of
   each sentence, with the shadowing row underneath. Off — free playback with
   the rolling two-line transcript.
@@ -61,8 +61,8 @@ when you want to study — click that button → a **full-screen study mode** op
 
 Technique: you repeat one sentence out loud right after the speaker, until it
 sounds natural, then move to the next. In study mode the video stops at the
-end of the current sentence; hit **Повторити** as many times as you need, then
-**Наступне**. Sentences are detected by punctuation
+end of the current sentence; hit **Repeat** as many times as you need, then
+**Next**. Sentences are detected by punctuation
 (`.`, `!`, `?`, `…`) regardless of how the captions are split into lines.
 
 ## How it's built
@@ -88,7 +88,7 @@ require a new interception.
 ## Diagnostics (settings → Advanced)
 
 Open the settings drawer (⚙) and scroll to **Advanced** — the log lives there,
-with a "Скопіювати лог" button. Key lines:
+with a "Copy log" button. Key lines:
 
 - `tracks from playerResponse: N [...]` — how many subtitle tracks the player
   sees (`0` = the video has no YouTube captions).
