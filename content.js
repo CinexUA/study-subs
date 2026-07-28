@@ -310,13 +310,32 @@
     return { idx, n: Math.max(1, n) };
   }
 
+  // How long a caption unit plausibly sounds, guessed from its own text: json3
+  // hands us the NEXT word's onset as this word's `end` whenever speech is
+  // continuous, so on those words the parser end is not the end of speech at
+  // all. Letters stand in for syllables well enough — "understanding" earns its
+  // time, "is" does not. The 0.9 cap guards a single word claiming a huge
+  // duration; a multi-word unit (a whole line, as coarse tracks give us) is
+  // meant to be long, so it is capped only by the next unit's onset.
+  const UNIT_LETTERS_RE = /[^\p{L}\p{N}']/gu;
+  function estSpeechDur(text) {
+    const s = String(text || '').trim();
+    const d = 0.08 + 0.075 * s.replace(UNIT_LETTERS_RE, '').length;
+    return /\s/.test(s) ? Math.max(d, 0.18) : clamp(d, 0.18, 0.9);
+  }
+
   // Split word units into sentences (period/!/?/… ends one; a long silence
   // also breaks — ASR tracks may lack punctuation entirely). Each sentence
-  // keeps its units (word-by-word reveal) and an end = just AFTER the last
-  // word is spoken (unit `end` from dDurationMs/dur), clamped to safely
-  // before the next word's onset. Stopping right after speech — instead of
-  // riding the silence to the brink of the next word — is what keeps the
-  // next sentence's audio from bleeding in even when timestamps are off.
+  // keeps its units (word-by-word reveal) plus two times:
+  //   `end`  — the sentence's time WINDOW, used by the text side (translation
+  //            alignment, reveal progress, pre-roll). Never move it: alignUaToEn
+  //            leans on it to decide which words belong to the next sentence.
+  //   `stop` — where playback pauses in study mode, trimmed so a guard of
+  //            silence always sits between it and the next word's onset.
+  // The two used to be one value, and that is exactly why the next sentence's
+  // first syllable bled through on every sentence the author did not pause after.
+  const SENT_TAIL = 0.12;   // let the last word ring out when there is room
+  const SENT_GUARD = 0.2;   // silence we insist on before the next word's onset
   function buildSentences(units) {
     const out = [];
     let cur = null, buf = '';
@@ -333,6 +352,24 @@
       cur.end = next
         ? Math.max(Math.min(se + 0.2, next.t - 0.08), Math.min(u.t + 0.15, next.t - 0.03))
         : (video && video.duration ? video.duration : se + 0.6);
+      if (next) {
+        // Trust the parser's end only when it stops SHORT of the next onset —
+        // then it is a real recorded end (the author paused), and the sentence
+        // keeps exactly the ending it has today. When it runs into the next
+        // word, it is that word's onset wearing a disguise, and the unit's own
+        // text is the better witness.
+        const est = u.t + estSpeechDur(u.text);
+        const ridesNext = u.end == null || u.end >= next.t - 0.05;
+        // Trusted: today's value, except a multi-word unit may outlive the
+        // single-word cap baked into spokenEnd — a whole line is meant to be long.
+        const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
+        cur.stop = Math.max(
+          Math.min(spoken + (ridesNext ? SENT_TAIL : 0.2), next.t - SENT_GUARD),
+          Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
+        );
+      } else {
+        cur.stop = cur.end;
+      }
       out.push(cur);
       cur = null;
     };
@@ -392,7 +429,7 @@
   // arms a stop 1 ms away, so playback dies the instant it starts.
   const SENT_EPS = 0.02;
   function findSentenceAt(t) {
-    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].end - SENT_EPS) return i;
+    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].stop - SENT_EPS) return i;
     return Math.max(0, sentences.length - 1);
   }
 
@@ -442,7 +479,7 @@
     if (!video || !sentences.length) return;
     sentIdx = clamp(i, 0, sentences.length - 1);
     const s = sentences[sentIdx];
-    stopAt = stopping() ? s.end : null;
+    stopAt = stopping() ? s.stop : null;
     sentenceDone = false;
     const prevEnd = sentIdx > 0 ? sentences[sentIdx - 1].end : 0;
     // A touch early, so the first word's attack isn't clipped by the seek.
@@ -471,6 +508,10 @@
     // "carry on into the next sentence".
     sentenceDone = true;
     const over = video.currentTime - stopAt;
+    // Tells apart the two ways a stop can be late: a boundary placed too close
+    // to the next word (fix that in buildSentences) or a timer that simply
+    // fired behind schedule (fix that here).
+    if (over > 0.05) dbg(`sentence stop overshot by ${Math.round(over * 1000)} ms`);
     if (over > 0.005 && over < 0.8) {
       suppressSeek = true; // our own correction — not a user seek
       try { video.currentTime = stopAt; } catch (_) { suppressSeek = false; }
@@ -486,7 +527,7 @@
     if (!state.reader || !sentences.length || !video) return;
     const i = findSentenceAt(video.currentTime || 0);
     if (i !== sentIdx) { sentIdx = i; lastSig = null; }
-    stopAt = stopping() ? sentences[sentIdx].end : null;
+    stopAt = stopping() ? sentences[sentIdx].stop : null;
     sentenceDone = false;   // the playhead moved: nothing is waiting to be replayed
     armStop();
   }
@@ -500,7 +541,7 @@
   function armStudy() {
     if (!video || !sentences.length) return;
     sentIdx = findSentenceAt(video.currentTime || 0);
-    stopAt = stopping() ? sentences[sentIdx].end : null;
+    stopAt = stopping() ? sentences[sentIdx].stop : null;
     sentenceDone = false;
     armStop();
     lastSig = null;
@@ -752,10 +793,12 @@
   }
 
   // Translation reveal follows the EN sentence's PROGRESS (not UA timestamps),
-  // so it stays in step and shows fully exactly when the sentence ends.
+  // so it stays in step and shows fully exactly when playback stops — hence
+  // `stop`, not `end`: measured against the window, the last word of the
+  // translation would still be missing at the moment the sentence pauses.
   function uaRevealCount(enS, uaS, t) {
     if (!enS || !uaS) return 0;
-    const span = (enS.end - enS.start) || 1;
+    const span = ((enS.stop != null ? enS.stop : enS.end) - enS.start) || 1;
     const p = clamp((t - enS.start) / span, 0, 1);
     return Math.max(1, Math.ceil(p * uaS.units.length));
   }
