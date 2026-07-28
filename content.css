@@ -669,6 +669,11 @@
   transition: background var(--d2) var(--ease-out), color var(--d1) linear;
 }
 .ytds-text-btn:hover { background: var(--bg-hover); color: var(--ink); }
+/* Copy log answers for itself: accent while it worked, plain warning if not. */
+.ytds-text-btn.ytds-ok { color: var(--accent); background: var(--bg-hover); }
+.ytds-text-btn.ytds-bad { color: var(--ink); background: var(--bg-sunken); }
+/* Clipboard fallback needs a real, selectable node — just not a visible one. */
+.ytds-clip { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
 
 .ytds-keys {
   display: flex;

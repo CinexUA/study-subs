@@ -84,7 +84,7 @@
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
   let btnStudy, btnFocus;
-  let awakeTimer = null, hintTimer = null;
+  let awakeTimer = null, hintTimer = null, copyTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
   let sleepPt = null;         // where it was when the interface hid
   let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
@@ -1275,6 +1275,39 @@
   function openDrawer() { if (panel) panel.classList.add('ytds-drawer-open'); }
   function closeDrawer() { if (panel) { panel.classList.remove('ytds-drawer-open'); closeMenus(); } }
 
+  // The log is a stack of divs, and textContent runs them together into one
+  // unreadable string — every line needs its own newline. And a copy that says
+  // nothing is a copy you cannot trust: the button reports what happened.
+  function buildCopyLog() {
+    const btn = mkBtn('ytds-text-btn', 'Copy the whole log to the clipboard', async () => {
+      const text = [...elLog.children].map((n) => n.textContent).join('\n');
+      let ok = false;
+      try { await navigator.clipboard.writeText(text); ok = true; } catch (_) { ok = copyFallback(text); }
+      clearTimeout(copyTimer);
+      btn.textContent = ok ? `Copied ${elLog.childElementCount} lines` : 'Copy failed';
+      btn.classList.add(ok ? 'ytds-ok' : 'ytds-bad');
+      copyTimer = setTimeout(() => {
+        btn.textContent = 'Copy log';
+        btn.classList.remove('ytds-ok', 'ytds-bad');
+      }, 1800);
+    }, txt('Copy log'));
+    return btn;
+  }
+
+  // The clipboard API needs the document focused, and inside our own
+  // fullscreen element that is not a given — the old way still works there.
+  function copyFallback(text) {
+    try {
+      const ta = el('textarea', 'ytds-clip');
+      ta.value = text;
+      panel.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (_) { return false; }
+  }
+
   function buildDrawer() {
     const scrim = el('div', 'ytds-scrim');
     scrim.addEventListener('click', closeDrawer);
@@ -1300,9 +1333,7 @@
       group('Advanced', 'console'),
       elStatus,
       elLog,
-      mkBtn('ytds-text-btn', '', () => {
-        navigator.clipboard.writeText(elLog.textContent || '').catch(() => {});
-      }, txt('Copy log'))
+      buildCopyLog()
     );
 
     elKeys = el('div', 'ytds-keys');
