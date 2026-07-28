@@ -105,6 +105,22 @@
       return;
     }
 
+    // The overlay's play/pause button: press the player's own control, which
+    // is exactly what the Space key ends up doing. Nothing here decides
+    // whether to play or to pause — the player owns that state.
+    if (e.data.type === 'YTDS_TOGGLE_PLAY') {
+      const btn = document.querySelector('.ytp-play-button');
+      if (btn) { btn.click(); return; }
+      try {
+        const p = document.getElementById('movie_player');
+        // 1 = playing, in the player's own vocabulary.
+        if (p && p.getPlayerState) { p.getPlayerState() === 1 ? p.pauseVideo() : p.playVideo(); return; }
+      } catch (_) {}
+      const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      if (v) { v.paused ? v.play().catch(() => {}) : v.pause(); }
+      return;
+    }
+
     // Play/pause through the player itself, so its state machine agrees with
     // us and does not put playback back on a moment after our own pause.
     if (e.data.type === 'YTDS_PLAY' || e.data.type === 'YTDS_PAUSE') {

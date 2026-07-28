@@ -978,19 +978,14 @@
     });
   }
 
+  // The button is a proxy for the player's own play/pause — literally the
+  // control the Space key drives. Anything we do to the media element ourselves
+  // the player may undo a moment later; going through its own toggle cannot
+  // disagree with it. Study mode needs nothing here: the play/pause events and
+  // the render loop re-arm the sentence stop wherever playback ends up.
   function togglePlay() {
-    if (!video) return;
-    if (!video.paused) { pauseVideo(); return; }
-    // ▶ never leaves study mode unarmed: whoever paused us and however long
-    // ago, take the sentence the playhead is in and stop at its end again.
-    if (state.reader && stopping() && sentences.length) {
-      const i = findSentenceAt(video.currentTime || 0);
-      // Sitting on a boundary (an auto-stop) means the next sentence has not
-      // started yet — begin at its first word instead of the silence.
-      if (video.currentTime <= sentences[i].start) { playSentence(i); return; }
-      armStudy();
-    }
-    playVideo();
+    pauseIntentAt = 0;   // whatever the player does now, the user asked for it
+    window.postMessage({ type: 'YTDS_TOGGLE_PLAY' }, '*');
   }
 
   function buildScrub() {

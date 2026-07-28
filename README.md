@@ -42,7 +42,8 @@ when you want to study — click that button → a **full-screen study mode** op
   timecode): the previous line stays above, dimmed.
 - **Custom playback controls**: ±10 s, pause/play, **speed** (0.5×–2×), time,
   and a scrubber whose notches are sentence boundaries — clicking it snaps to
-  the start of the sentence under the cursor.
+  the start of the sentence under the cursor. Pause/play presses the player's
+  own control, so it and the Space key are the same action.
 - **Shadowing row**: **Previous · Repeat · Next**. "Repeat" is a plain action —
   one press replays the current sentence from its start.
 - **Study mode ("Study" button in the top bar)**: the overlay switches to one
