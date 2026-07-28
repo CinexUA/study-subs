@@ -529,7 +529,7 @@
       window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
       if (sawTracks) {
         dbg('gave up: the player never returned usable captions for this track');
-        setStatus('the player returned no captions — switch CC on in the player once, or reload the page');
+        setStatus('the player returned no captions — switch CC off and on in the player, or reload the page');
       } else {
         dbg('gave up: no caption tracks at all — the video likely has none');
         setStatus('this video has no YouTube captions');
@@ -559,10 +559,12 @@
     window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
   }
 
-  // The player sometimes answers its own first request with an empty body —
-  // the captions module was not ready yet, or it asked for a stale
-  // translation (`tlang=ru` when nothing on screen says so). The URL still
-  // carries a valid token, so asking again a moment later usually wins.
+  // The player sometimes answers its own first request with a body we cannot
+  // use: a stale translation (`tlang=ru` when nothing on screen says so), or
+  // nothing at all — an invalid/missing `pot` returns HTTP 200 with 0 bytes.
+  // Dropping the translation and asking again fixes the first case; the second
+  // one never recovers on this url, and the CC off→on toggle in injected.js
+  // (which makes the player mint a new one) is what saves us there.
   function scheduleCaptureRetry() {
     if (!capturedBase || captureRetries >= 4) return;
     const attempt = ++captureRetries;
@@ -580,7 +582,8 @@
       dbg(e.data.msg);
     } else if (e.data.type === 'YTDS_TT') {
       const tl = /[?&]tlang=([^&]*)/.exec(e.data.url);
-      dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, body=${(e.data.body || '').length} bytes)`);
+      const pot = /[?&]pot=/.test(e.data.url) ? 'yes' : 'NO';
+      dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, pot=${pot}, body=${(e.data.body || '').length} bytes)`);
       handleCaptured(e.data.url, e.data.body);
     }
   });
