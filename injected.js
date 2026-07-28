@@ -67,7 +67,13 @@
       }
     } catch (e) { info = 'error: ' + e.message; }
     log(`enable#${attempt}: ${info}${ok ? ' → triggered' : ''}`);
-    if (!ok && attempt < 10) setTimeout(() => enableCaptions(attempt + 1, token), 400);
+    // Keep nudging until the content script says it got usable captions
+    // (YTDS_STOP_ENABLE invalidates the token). "Triggered" is not "loaded":
+    // a CC click that lands before the captions module is ready makes the
+    // player fire one useless request — often for a stale translation — and
+    // then it never asks again on its own. Clicking is guarded by
+    // aria-pressed above, so a retry never switches captions back off.
+    if (attempt < 14) setTimeout(() => enableCaptions(attempt + 1, token), ok ? 1500 : 400);
   }
 
   window.addEventListener('message', (e) => {

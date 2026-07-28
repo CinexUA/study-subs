@@ -93,7 +93,9 @@ with a "Copy log" button. Key lines:
 - `tracks from playerResponse: N [...]` — how many subtitle tracks the player
   sees (`0` = the video has no YouTube captions).
 - `intercepted timedtext (…, body=… bytes)` — the player made a captions
-  request and whether the body was non-empty.
+  request and whether the body was non-empty. `body=0 bytes` means the player
+  answered its own request with nothing (usually because it fired before the
+  captions module was ready); the same URL is then retried a few times.
 - `ready: EN N words / L lines · M sentences · UK K words` — what was loaded.
 - `using cached valid URL` — the cache kicked in (e.g. on language switch).
 
@@ -106,6 +108,7 @@ with a "Copy log" button. Key lines:
   speech recognition (Whisper).
 - If captions are off in the player and the CC button doesn't trigger
   automatically — turn on **CC** manually once, and interception will pick it up.
+  The status line says so explicitly when the player kept returning nothing.
 
 ## Roadmap
 

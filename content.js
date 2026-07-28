@@ -53,6 +53,7 @@
   let awaitingCapture = false;
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
+  let captureRetries = 0, sawTracks = false;
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter;
   let btnStudy;
@@ -495,6 +496,7 @@
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
+    captureRetries = 0; sawTracks = false;
     clearTimeout(captureTimer);
     clearDisplay();
     setStatus('loading…');
@@ -510,6 +512,7 @@
     dbg(`tracks from playerResponse: ${tracks.length}` +
         (tracks.length ? ' [' + tracks.map((t) => `${t.lang}${t.kind === 'asr' ? '/asr' : ''}`).join(', ') + ']' : ''));
     if (tracks.length) {
+      sawTracks = true;
       const src = pickSrc(tracks);
       srcLang = src.lang || '';
       if (await buildFromBase(src.baseUrl, null, '')) { dbg('direct fetch succeeded'); return; }
@@ -521,12 +524,17 @@
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (awaitingCapture && !enLines.length) {
-        awaitingCapture = false;
-        dbg('9s timeout: no capture happened — the video likely has no captions');
-        setStatus('could not fetch captions — enable CC in the player manually');
+      if (!awaitingCapture || enLines.length) return;
+      awaitingCapture = false;
+      window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
+      if (sawTracks) {
+        dbg('gave up: the player never returned usable captions for this track');
+        setStatus('the player returned no captions — switch CC on in the player once, or reload the page');
+      } else {
+        dbg('gave up: no caption tracks at all — the video likely has none');
+        setStatus('this video has no YouTube captions');
       }
-    }, 9000);
+    }, 25000);
   }
 
   async function handleCaptured(url, body) {
@@ -536,10 +544,34 @@
 
     capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
 
-    if (!(await buildFromBase(base, body, capTlang))) { dbg('capture had no usable EN — waiting for another'); return; }
+    if (!(await buildFromBase(base, body, capTlang))) {
+      dbg(`capture had no usable EN (body=${(body || '').length} bytes) — retrying the same URL`);
+      scheduleCaptureRetry();
+      return;
+    }
+    captureDone();
+  }
+
+  function captureDone() {
     awaitingCapture = false;
+    captureRetries = 0;
     clearTimeout(captureTimer);
     window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
+  }
+
+  // The player sometimes answers its own first request with an empty body —
+  // the captions module was not ready yet, or it asked for a stale
+  // translation (`tlang=ru` when nothing on screen says so). The URL still
+  // carries a valid token, so asking again a moment later usually wins.
+  function scheduleCaptureRetry() {
+    if (!capturedBase || captureRetries >= 4) return;
+    const attempt = ++captureRetries;
+    setTimeout(async () => {
+      if (enLines.length || capturedForVideo !== currentVideoId) return;
+      dbg(`retry #${attempt} on the captured URL`);
+      if (await buildFromBase(capturedBase, null, '')) captureDone();
+      else scheduleCaptureRetry();
+    }, 1500 * attempt);
   }
 
   window.addEventListener('message', (e) => {
