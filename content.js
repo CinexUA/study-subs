@@ -32,8 +32,17 @@
     pause: '<svg viewBox="0 0 20 20" fill="none"><rect x="6" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/><rect x="11.1" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/></svg>',
     // Study mode only: shown instead of ▶ once a sentence has played out, where
     // pressing it means "this sentence again" rather than "carry on".
-    replay: S + '<path d="M10 4a6 6 0 1 1-5.6 8"/><path d="M7.7 1.8 10.2 4 7.7 6.2"/>' +
-      '<path d="M8.9 7.6 12.4 10 8.9 12.4Z" fill="currentColor"/></svg>',
+    // The one glyph not drawn on the shared 20×20 pencil: it is Vitaliy's own
+    // reference shape (svgrepo "replay symbol"), kept on its native 30-unit
+    // grid and merely recoloured — the silhouette is the spec here.
+    replay: '<svg viewBox="0 0 29.963 29.963" fill="none"><path fill="currentColor" d="' +
+      'M29.133,9.215c-0.775-0.428-1.751-0.146-2.178,0.63l-0.518,0.937c-1.772-5.424-6.874-9.356-12.882-9.356' +
+      'C6.081,1.426,0,7.507,0,14.981s6.081,13.555,13.555,13.555c0.886,0,1.604-0.718,1.604-1.603' +
+      'c0-0.885-0.718-1.603-1.604-1.603c-5.706,0-10.349-4.643-10.349-10.35S7.849,4.632,13.555,4.632' +
+      'c4.525,0,8.372,2.924,9.775,6.978l-0.876-0.483c-0.775-0.428-1.751-0.147-2.178,0.629' +
+      'c-0.428,0.776-0.147,1.751,0.629,2.178l3.169,1.748c0.261,0.531,0.801,0.901,1.434,0.901' +
+      'c0.16,0,0.311-0.031,0.456-0.074c0.009,0,0.016,0.003,0.025,0.003c0.565,0,1.112-0.298,1.406-0.829' +
+      'l2.368-4.292C30.191,10.618,29.909,9.643,29.133,9.215z"/></svg>',
     rewind: S + '<path d="M9.4 5.6 5 10l4.4 4.4M16 5.6 11.6 10 16 14.4"/></svg>',
     forward: S + '<path d="M10.6 5.6 15 10l-4.4 4.4M4 5.6 8.4 10 4 14.4"/></svg>',
     repeat: S + '<path d="M4.6 9.4v-.8A2.8 2.8 0 0 1 7.4 5.8h6.3M11.7 3.6 14 5.8l-2.3 2.2M15.4 10.6v.8a2.8 2.8 0 0 1-2.8 2.8H6.3M8.3 16.4 6 14.2l2.3-2.2"/></svg>',
@@ -1196,7 +1205,12 @@
     syncUi();
   }
 
-  document.addEventListener('keydown', (e) => {
+  // On `window`, not `document`: YouTube's own hotkey handler sits on document,
+  // and being first to register it would otherwise run before ours — Space then
+  // toggled playback twice (play, then instantly pause). The window is the first
+  // node of the capture phase, so stopping the event here means YouTube never
+  // sees the keys study mode has claimed.
+  window.addEventListener('keydown', (e) => {
     if (!state.reader || e.altKey || e.ctrlKey || e.metaKey) return;
     const key = e.key;
     if (key === 'Escape') {
@@ -1211,20 +1225,29 @@
     // — except the arrows, which the player cannot hear under our fullscreen,
     // so we do its own ±5 s ourselves.
     const study = state.study && sentences.length;
+    const claim = () => { e.preventDefault(); e.stopImmediatePropagation(); };
     if (key === 'ArrowLeft' || key === 'ArrowRight') {
-      e.preventDefault(); e.stopPropagation();
+      claim();
       const fwd = key === 'ArrowRight';
       if (study) playSentence(sentIdx + (fwd ? 1 : -1));
       else seekBy(fwd ? 5 : -5);
     } else if (e.code === 'Space') {
       if (!study) return;   // free reading: the player's own key, untouched
-      e.preventDefault(); e.stopPropagation();
+      claim();
       togglePlay();
     } else if (e.code === 'KeyR') {   // by physical key: layout-independent
       if (!study) return;
-      e.preventDefault(); e.stopPropagation();
+      claim();
       repeatSentence();
     }
+  }, true);
+
+  // The player also acts on keyup for Space. Swallowing it costs nothing and
+  // closes the last door through which one press could reach playback twice.
+  window.addEventListener('keyup', (e) => {
+    if (!state.reader || !state.study || !sentences.length) return;
+    if (e.code !== 'Space' || e.altKey || e.ctrlKey || e.metaKey) return;
+    e.preventDefault(); e.stopImmediatePropagation();
   }, true);
 
   document.addEventListener('fullscreenchange', () => {
