@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -59,7 +59,12 @@
     settings: S + '<path d="M3.6 6.6h2.1M10.4 6.6h6M3.6 13.4h6.9M15.1 13.4h1.3"/><circle cx="8.1" cy="6.6" r="2.3"/><circle cx="12.8" cy="13.4" r="2.3"/></svg>',
     check: S + '<path d="M4.8 10.5 8.2 13.9 15.2 6.5"/></svg>',
     study: S + '<path d="M4 15.4V6.1a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v9.3"/><path d="M4 15.4a2 2 0 0 1 2-1.9h10"/><path d="M10 4.1v9.4"/></svg>',
-    console: S + '<rect x="3.2" y="4.4" width="13.6" height="11.2" rx="2.6"/><path d="M6.6 8.6 8.9 10.9l-2.3 2.3M11.2 13.2h3.1"/></svg>'
+    console: S + '<rect x="3.2" y="4.4" width="13.6" height="11.2" rx="2.6"/><path d="M6.6 8.6 8.9 10.9l-2.3 2.3M11.2 13.2h3.1"/></svg>',
+    // Focus mode toggle: the eye shows what the interface is doing, not what
+    // the click will do — open while the controls are on screen, struck
+    // through once they are hidden.
+    eye: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/></svg>',
+    eyeOff: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/><path d="M4.6 15.4 15.4 4.6"/></svg>'
   };
 
   let state = { ...DEFAULTS };
@@ -75,8 +80,11 @@
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let captureRetries = 0, sawTracks = false;
   let video = null;
-  let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter;
-  let btnStudy;
+  let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
+  let btnStudy, btnFocus;
+  let awakeTimer = null, hintTimer = null;
+  let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
+  let sleepPt = null;         // where it was when the interface hid
   let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
   let rafId = null;
@@ -1002,7 +1010,13 @@
     if (panel) return true;
     panel = el('div', 'ytds-panel ytds-theme-' + state.theme);
     panel.addEventListener('click', closeMenus);
-    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer());
+    // Focus mode hides the chrome until the mouse says otherwise. The listener
+    // is on the panel and never swallows the event, so nothing else that
+    // watches for pointer movement is affected.
+    panel.addEventListener('mousemove', (e) => { ptr = { x: e.clientX, y: e.clientY }; wake(e); });
+    panel.addEventListener('click', wake);
+    elHint = el('div', 'ytds-hint', 'Move the mouse to bring the controls back');
+    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer(), elHint);
     syncUi();
     return true;
   }
@@ -1026,9 +1040,14 @@
 
     elCounter = el('div', 'ytds-counter');
 
+    btnFocus = mkBtn('ytds-icon ytds-focus-btn', 'Focus mode: hide everything but the text (move the mouse to bring it back)',
+      () => { toggleKey('focus'); if (state.focus) showHint(); }, icon('eye'));
+    btnFocus.dataset.key = 'focus';
+
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
       buildSwatches(),
+      btnFocus,
       mkBtn('ytds-icon ytds-gear', 'Settings', openDrawer, icon('settings')),
       mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))
     );
@@ -1235,6 +1254,7 @@
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
     for (const m of menus) m.sync();
+    if (btnFocus) setIcon(btnFocus, state.focus ? 'eyeOff' : 'eye');
     renderKeys();
     updateLabels();
     updateCounter();
@@ -1259,9 +1279,56 @@
 
   function applyTheme() {
     if (!panel) return;
+    const awake = panel.classList.contains('ytds-awake');
     panel.className = 'ytds-panel ytds-theme-' + state.theme
       + (state.study ? ' ytds-study' : '')
+      + (state.focus ? ' ytds-focus' : '')
+      + (awake ? ' ytds-awake' : '')
       + (drawerIsOpen() ? ' ytds-drawer-open' : '');
+  }
+
+  // Focus mode: the bar, the shadowing row and the transport fade out, leaving
+  // the text alone on the screen — and the cursor with them. Any mouse move
+  // brings them back for a breath. They keep their space while hidden (opacity,
+  // not display): the reading line must not jump every time the chrome returns.
+  const AWAKE_MS = 2500;
+  // A hand resting on the mouse still sends events — sub-pixel jitter, a knock
+  // on the desk. Waking on any of them meant the interface came back on its own
+  // a blink after it hid, which read as "the button does nothing". So the
+  // pointer has to actually TRAVEL this far from where it was when we hid.
+  const WAKE_PX = 16;
+  function wake(e) {
+    if (!panel || !state.focus) return;
+    // The click that switches focus on is a request to hide NOW, not a sign of
+    // life: it bubbles up here, and without this it woke what it just hid.
+    // Only the click itself — moving across the eye must never hide the
+    // controls out from under the cursor that came to press it.
+    if (e && e.type === 'click' && e.target.closest && e.target.closest('.ytds-focus-btn')) { sleep(); return; }
+    if (sleepPt && Math.hypot(ptr.x - sleepPt.x, ptr.y - sleepPt.y) < WAKE_PX) return;
+    sleepPt = null;
+    panel.classList.add('ytds-awake');
+    clearTimeout(awakeTimer);
+    awakeTimer = setTimeout(sleep, AWAKE_MS);
+  }
+  function sleep() {
+    clearTimeout(awakeTimer); awakeTimer = null;
+    if (!panel) return;
+    // An open menu or drawer would vanish from under the cursor; wait it out.
+    if (drawerIsOpen() || panel.querySelector('.ytds-menu.ytds-open')) {
+      awakeTimer = setTimeout(sleep, AWAKE_MS);
+      return;
+    }
+    sleepPt = { x: ptr.x, y: ptr.y };
+    panel.classList.remove('ytds-awake');
+  }
+
+  // Hiding the whole interface is not self-explanatory the first time, and the
+  // way back least of all — so the mode says it out loud, once, as it goes.
+  function showHint() {
+    if (!elHint) return;
+    elHint.classList.add('ytds-hint-on');
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => elHint.classList.remove('ytds-hint-on'), 2200);
   }
 
   function applyLayout() {
@@ -1292,6 +1359,7 @@
     document.documentElement.classList.add('ytds-reader');
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
     syncUi();
+    wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
   }

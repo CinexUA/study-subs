@@ -146,6 +146,47 @@
   white-space: nowrap;
 }
 
+/* ---------- Focus mode ----------
+   Everything but the stage fades out, cursor included, and any mouse move
+   (.ytds-awake) brings it back for a breath. Hidden with opacity rather than
+   display on purpose: the blocks keep their space, so the reading line never
+   moves when the chrome comes and goes. */
+.ytds-focus .ytds-top,
+.ytds-focus .ytds-study-row,
+.ytds-focus .ytds-controls {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--d5) var(--ease-out);   /* leaving is a slow breath */
+}
+.ytds-focus.ytds-awake .ytds-top,
+.ytds-focus.ytds-awake .ytds-study-row,
+.ytds-focus.ytds-awake .ytds-controls {
+  opacity: 1;
+  pointer-events: auto;
+  transition: opacity var(--d2) var(--ease-out);   /* coming back is immediate */
+}
+.ytds-focus:not(.ytds-awake) { cursor: none; }
+
+/* Said once, as focus mode closes over: without it the way back is a guess. */
+.ytds-hint {
+  position: absolute;
+  left: 50%;
+  bottom: calc(7 * var(--u));
+  transform: translateX(-50%);
+  padding: calc(1 * var(--u)) calc(2 * var(--u));
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-pill);
+  background: var(--bg-elev);
+  box-shadow: var(--e2);
+  font: 500 calc(1.05 * var(--u)) / 1 var(--sans);
+  color: var(--ink-2);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--d4) var(--ease-out);
+}
+.ytds-hint-on { opacity: 1; }
+
 /* Segmented tray: a sunken pill holding two or three related controls. */
 .ytds-seg {
   display: inline-flex;
