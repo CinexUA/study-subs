@@ -298,30 +298,28 @@
 .ytds-sbtn.ytds-prev { padding-left: calc(1.1 * var(--u)); }
 .ytds-sbtn.ytds-next { padding-right: calc(1.1 * var(--u)); }
 
-/* Repeat is the hero of the row: taller, filled when armed. */
+/* Repeat is the hero of the row: taller and filled. It is an action, not a
+   mode — no on/off state, one press replays the sentence. */
 .ytds-sbtn.ytds-primary {
   height: calc(3.7 * var(--u));
   padding: 0 calc(1.9 * var(--u));
   gap: calc(.75 * var(--u));
-  border: 1px solid var(--line);
-  background-color: var(--bg-elev);
-  background-image: var(--face);
-  color: var(--ink);
-  font-size: calc(1.25 * var(--u));
-  box-shadow: var(--e2);
-  transition: transform var(--d2) var(--ease-spring), box-shadow var(--d3) var(--ease-out),
-              background-color var(--d3) var(--ease-out), color var(--d2) linear;
-}
-.ytds-sbtn.ytds-primary svg { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); }
-.ytds-sbtn.ytds-primary:hover { transform: translateY(-1px) scale(1.015); background-color: var(--bg-elev); }
-.ytds-sbtn.ytds-primary:active { transform: translateY(1px) scale(.975); }
-.ytds-sbtn.ytds-primary.ytds-on {
-  border-color: var(--accent);
+  border: 1px solid var(--accent);
   background-color: var(--accent);
   background-image: var(--accent-face);
   color: var(--accent-ink);
-  box-shadow: var(--e2), var(--ring);
+  font-size: calc(1.25 * var(--u));
+  box-shadow: var(--e2);
+  transition: transform var(--d2) var(--ease-spring), box-shadow var(--d3) var(--ease-out);
 }
+.ytds-sbtn.ytds-primary svg { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); }
+.ytds-sbtn.ytds-primary:hover {
+  transform: translateY(-1px) scale(1.015);
+  background-color: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--e3), var(--ring);
+}
+.ytds-sbtn.ytds-primary:active { transform: translateY(1px) scale(.975); box-shadow: var(--press); }
 
 /* ---------- Transport row ---------- */
 .ytds-controls {

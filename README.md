@@ -44,8 +44,7 @@ when you want to study — click that button → a **full-screen study mode** op
   and a scrubber whose notches are sentence boundaries — clicking it snaps to
   the start of the sentence under the cursor.
 - **Shadowing row**: **Попереднє · Повторити · Наступне**. "Повторити" is a
-  toggle — while it's on, the current sentence replays in a loop (with a short
-  pause each time, so you can repeat it aloud).
+  plain action — one press replays the current sentence from its start.
 - **Study mode ("Навчання" button in the top bar, also in settings)**: the
   overlay switches to one sentence at a time and the video stops at the end of
   each sentence, with the shadowing row underneath. Off — free playback with
@@ -61,9 +60,9 @@ when you want to study — click that button → a **full-screen study mode** op
 ### Shadowing
 
 Technique: you repeat one sentence out loud right after the speaker, until it
-sounds natural, then move to the next. With auto-pause on, the video stops at
-the end of the current sentence; hit **Повторити** to loop it as long as you
-need, then **Наступне**. Sentences are detected by punctuation
+sounds natural, then move to the next. In study mode the video stops at the
+end of the current sentence; hit **Повторити** as many times as you need, then
+**Наступне**. Sentences are detected by punctuation
 (`.`, `!`, `?`, `…`) regardless of how the captions are split into lines.
 
 ## How it's built

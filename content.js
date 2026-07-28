@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, loop: false };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true };
   const LANGS = [
     ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
     ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
@@ -57,7 +57,6 @@
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter;
   let btnStudy;
   let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub;
-  let btnLoop;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
@@ -360,9 +359,8 @@
     return Math.max(0, sentences.length - 1);
   }
 
-  // Playback stops at the end of a sentence when auto-pause is on, and also
-  // while looping — the loop is built on top of that same stop.
-  function stopping() { return !!(state.study || state.loop); }
+  // Playback stops at the end of a sentence only in study mode.
+  function stopping() { return !!state.study; }
 
   // Seek to just before a sentence's first word and play until its end.
   function playSentence(i) {
@@ -400,11 +398,6 @@
     }
     stopAt = null;
     lastCtl = '';
-    // Loop: after the pause that lets the learner repeat aloud, play it again.
-    if (state.loop && state.reader) {
-      const at = sentIdx;
-      setTimeout(() => { if (state.loop && state.reader && sentIdx === at) playSentence(at); }, 600);
-    }
   }
 
   // After any user seek or a resume outside our controls, the text must show
@@ -435,21 +428,12 @@
   function setStudy(on) {
     state.study = on; saveState();
     if (on) armStudy();
-    else { // free play again — and the loop has nothing to hang on either
-      state.loop = false;
-      stopAt = null; clearTimeout(stopTimer); stopTimer = null;
-    }
+    else { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
     syncUi();
   }
 
-  // Repeat is a toggle: turning it on restarts the sentence and keeps
-  // replaying it; turning it off lets playback move on.
-  function setLoop(on) {
-    state.loop = on; saveState();
-    if (on) playSentence(sentIdx);
-    else if (!state.study) { stopAt = null; clearTimeout(stopTimer); stopTimer = null; }
-    syncUi();
-  }
+  // Repeat is a plain action, not a mode: play this sentence once more.
+  function repeatSentence() { playSentence(sentIdx); }
 
   function applySpeed() {
     if (video) { try { video.playbackRate = state.speed || 1; } catch (_) {} }
@@ -871,13 +855,10 @@
 
   // Shadowing row: previous / repeat / next sentence. Repeat is the hero.
   function buildStudyRow() {
-    btnLoop = mkBtn('ytds-sbtn ytds-primary', 'Повторювати це речення (R)', () => setLoop(!state.loop),
-      icon('repeat'), el('span', null, 'Повторити'));
-
     const tray = el('div', 'ytds-study-tray');
     tray.append(
       mkBtn('ytds-sbtn ytds-prev', 'Попереднє речення (←)', () => playSentence(sentIdx - 1), icon('chevL'), el('span', null, 'Попереднє')),
-      btnLoop,
+      mkBtn('ytds-sbtn ytds-primary', 'Повторити це речення (R)', repeatSentence, icon('repeat'), el('span', null, 'Повторити')),
       mkBtn('ytds-sbtn ytds-next', 'Наступне речення (→)', () => playSentence(sentIdx + 1), el('span', null, 'Наступне'), icon('chevR'))
     );
     const row = el('div', 'ytds-study-row');
@@ -1050,11 +1031,6 @@
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
-    if (btnLoop) {
-      btnLoop.classList.toggle('ytds-on', !!state.loop);
-      const lab = btnLoop.querySelector('span');
-      if (lab) lab.textContent = state.loop ? 'Повторюю' : 'Повторити';
-    }
     for (const m of menus) m.sync();
     updateLabels();
     updateCounter();
@@ -1143,8 +1119,9 @@
       e.preventDefault(); e.stopPropagation();
       playSentence(sentIdx + (key === 'ArrowRight' ? 1 : -1));
     } else if (key === 'r' || key === 'R' || key === 'к' || key === 'К') {
+      if (!sentences.length) return;
       e.preventDefault(); e.stopPropagation();
-      setLoop(!state.loop);
+      repeatSentence();
     }
   }, true);
 
