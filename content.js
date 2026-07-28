@@ -355,8 +355,13 @@
     return out;
   }
 
+  // The auto-stop leaves the playhead a hair short of the sentence end (the
+  // clock keeps ticking between the pause and our correction seek). Without
+  // this margin "resume" lands back in the sentence that just finished and
+  // arms a stop 1 ms away, so playback dies the instant it starts.
+  const SENT_EPS = 0.02;
   function findSentenceAt(t) {
-    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].end) return i;
+    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].end - SENT_EPS) return i;
     return Math.max(0, sentences.length - 1);
   }
 
@@ -601,12 +606,12 @@
     // Study mode: one sentence at a time, EN and the translation index-aligned,
     // so the next sentence's words can never bleed across the two tracks.
     if (state.study && sentences.length) {
-      // Playing with no stop armed = a resume outside our controls — follow
-      // the audio instead of freezing on a stale sentence.
-      if (!video.paused && stopAt == null) {
-        const i = findSentenceAt(t);
-        if (i !== sentIdx) { sentIdx = i; lastSig = null; }
-      }
+      // Playing with no stop armed = playback started behind our back (Space,
+      // YouTube's own controls, autoplay right after our stop). Study mode must
+      // not quietly switch itself off: take the sentence the audio is in and
+      // arm its end again. resync() does both, and once stopAt is set this
+      // costs nothing on the following frames.
+      if (!video.paused && stopAt == null) resync();
       const enS = sentences[sentIdx];
       const uaS = uaSentences[sentIdx];
       const enN = revealCount(enS, t);
@@ -776,7 +781,13 @@
     b.className = cls;
     if (title) b.title = title;
     b.append(...kids);
-    b.addEventListener('click', onClick);
+    b.addEventListener('click', (e) => {
+      // A clicked button keeps focus, and Space then re-presses it — on top of
+      // YouTube's own Space handler. That makes every later Space toggle
+      // playback twice and look like our controls are fighting the player.
+      b.blur();
+      onClick(e);
+    });
     return b;
   }
   function txt(s) { return document.createTextNode(s); }
@@ -935,10 +946,16 @@
   function togglePlay() {
     if (!video) return;
     if (!video.paused) { video.pause(); return; }
-    // After an auto-stop ▶ means "next sentence" (skips the silence); a manual
-    // mid-sentence pause (stop still armed) just resumes.
-    if (state.reader && stopping() && sentences.length && stopAt == null) playSentence(sentIdx + 1);
-    else video.play().catch(() => {});
+    // ▶ never leaves study mode unarmed: whoever paused us and however long
+    // ago, take the sentence the playhead is in and stop at its end again.
+    if (state.reader && stopping() && sentences.length) {
+      const i = findSentenceAt(video.currentTime || 0);
+      // Sitting on a boundary (an auto-stop) means the next sentence has not
+      // started yet — begin at its first word instead of the silence.
+      if (video.currentTime <= sentences[i].start) { playSentence(i); return; }
+      armStudy();
+    }
+    video.play().catch(() => {});
   }
 
   function buildScrub() {
