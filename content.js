@@ -30,6 +30,10 @@
   const ICONS = {
     play: '<svg viewBox="0 0 20 20" fill="none"><path d="M6.9 4.5 15.6 10 6.9 15.5Z" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
     pause: '<svg viewBox="0 0 20 20" fill="none"><rect x="6" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/><rect x="11.1" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/></svg>',
+    // Study mode only: shown instead of ▶ once a sentence has played out, where
+    // pressing it means "this sentence again" rather than "carry on".
+    replay: S + '<path d="M10 4a6 6 0 1 1-5.6 8"/><path d="M7.7 1.8 10.2 4 7.7 6.2"/>' +
+      '<path d="M8.9 7.6 12.4 10 8.9 12.4Z" fill="currentColor"/></svg>',
     rewind: S + '<path d="M9.4 5.6 5 10l4.4 4.4M16 5.6 11.6 10 16 14.4"/></svg>',
     forward: S + '<path d="M10.6 5.6 15 10l-4.4 4.4M4 5.6 8.4 10 4 14.4"/></svg>',
     repeat: S + '<path d="M4.6 9.4v-.8A2.8 2.8 0 0 1 7.4 5.8h6.3M11.7 3.6 14 5.8l-2.3 2.2M15.4 10.6v.8a2.8 2.8 0 0 1-2.8 2.8H6.3M8.3 16.4 6 14.2l2.3-2.2"/></svg>',
@@ -49,6 +53,7 @@
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
+  let lastPlayIcon = '';  // transport glyph currently in the DOM (play/pause/replay)
   let currentVideoId = null;
   let awaitingCapture = false;
   let captureTimer = null;
@@ -66,6 +71,7 @@
   let uaSentences = [];  // translation sentences, index-aligned to `sentences`
   let sentIdx = 0;
   let stopAt = null;
+  let sentenceDone = false;  // the current sentence played out and we stopped at its end
   let stopTimer = null;      // precise stop scheduled for the exact remaining time
   let suppressSeek = false;  // our own currentTime writes must not look like user seeks
   let pauseIntentAt = 0;     // when we last asked for a pause (resume guard)
@@ -373,21 +379,27 @@
   // The player keeps its own idea of whether the video should be playing, and
   // when we drive the media element behind its back it puts playback back on a
   // moment later — a pause that "does not stick", and every sentence stop lost
-  // with it. So each play/pause also goes through the player API in the page
-  // world (that is the path the Space key takes, and Space always behaves).
-  // The element call stays first: it is synchronous, which the stop needs.
+  // with it. So each play/pause also states the wish to the page world, which
+  // presses the player's own button (the path the Space key takes) whenever the
+  // player disagrees. The element call stays first: it is synchronous, which
+  // the stop needs.
+  const wishPlay = (want) => window.postMessage({ type: 'YTDS_SET_PLAY', want }, '*');
   function playVideo() {
     if (!video) return;
     pauseIntentAt = 0;
     video.play().catch(() => {});
-    window.postMessage({ type: 'YTDS_PLAY' }, '*');
+    wishPlay(true);
   }
   function pauseVideo() {
     if (!video) return;
     pauseIntentAt = performance.now();
     pauseGuardNoted = false;
     video.pause();
-    window.postMessage({ type: 'YTDS_PAUSE' }, '*');
+    wishPlay(false);
+  }
+  function seekBy(d) {
+    if (!video || !video.duration) return;
+    video.currentTime = clamp(video.currentTime + d, 0, video.duration);
   }
 
   // Last line of defence: if playback is on again within a blink of our pause,
@@ -399,7 +411,7 @@
     if (performance.now() - pauseIntentAt > 250) { pauseIntentAt = 0; return; }
     if (!pauseGuardNoted) { pauseGuardNoted = true; dbg('playback resumed right after our pause — holding it'); }
     video.pause();
-    window.postMessage({ type: 'YTDS_PAUSE' }, '*');
+    wishPlay(false);
   }
 
   // Seek to just before a sentence's first word and play until its end.
@@ -408,6 +420,7 @@
     sentIdx = clamp(i, 0, sentences.length - 1);
     const s = sentences[sentIdx];
     stopAt = stopping() ? s.end : null;
+    sentenceDone = false;
     const prevEnd = sentIdx > 0 ? sentences[sentIdx - 1].end : 0;
     // A touch early, so the first word's attack isn't clipped by the seek.
     const from = Math.min(Math.max(s.start - 0.15, prevEnd), s.start);
@@ -431,6 +444,9 @@
     if (stopAt == null || !video || video.paused) return;
     if (video.currentTime < stopAt - 0.005) { armStop(); return; } // fired early (seek lag / buffering)
     pauseVideo();
+    // The one place this is set: from here on ▶ means "play it again", not
+    // "carry on into the next sentence".
+    sentenceDone = true;
     const over = video.currentTime - stopAt;
     if (over > 0.005 && over < 0.8) {
       suppressSeek = true; // our own correction — not a user seek
@@ -448,6 +464,7 @@
     const i = findSentenceAt(video.currentTime || 0);
     if (i !== sentIdx) { sentIdx = i; lastSig = null; }
     stopAt = stopping() ? sentences[sentIdx].end : null;
+    sentenceDone = false;   // the playhead moved: nothing is waiting to be replayed
     armStop();
   }
 
@@ -461,6 +478,7 @@
     if (!video || !sentences.length) return;
     sentIdx = findSentenceAt(video.currentTime || 0);
     stopAt = stopping() ? sentences[sentIdx].end : null;
+    sentenceDone = false;
     armStop();
     lastSig = null;
   }
@@ -468,7 +486,7 @@
   function setStudy(on) {
     state.study = on; saveState();
     if (on) armStudy();
-    else { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
+    else { stopAt = null; sentenceDone = false; clearTimeout(stopTimer); stopTimer = null; } // free play again
     syncUi();
   }
 
@@ -521,7 +539,7 @@
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
     sentences = buildSentences(enUnits);
     uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
-    sentIdx = 0; stopAt = null;
+    sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
     dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
@@ -532,7 +550,7 @@
 
   async function loadCaptions() {
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
-    sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
+    sentences = []; uaSentences = []; sentIdx = 0; stopAt = null; sentenceDone = false;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
     captureRetries = 0; sawTracks = false;
@@ -754,10 +772,19 @@
     // Outside the signature gate below: captions usually arrive while the
     // video is paused, i.e. while that gate is short-circuiting every frame.
     if (dur && (dur !== ticksDur || sentences.length !== ticksLen)) buildTicks(dur);
-    const sig = `${cur.toFixed(1)}|${video.paused ? 0 : 1}|${Math.floor(dur)}`;
+    const sig = `${cur.toFixed(1)}|${video.paused ? 0 : 1}|${sentenceDone ? 1 : 0}|${Math.floor(dur)}`;
     if (sig === lastCtl) return;
     lastCtl = sig;
-    if (elPlay) setIcon(elPlay, video.paused ? 'play' : 'pause');
+    // The glyph is the only place the third state is visible: after an auto-stop
+    // ▶ would silently mean something else, so it stops looking like ▶.
+    if (elPlay) {
+      const name = video.paused ? (sentenceDone ? 'replay' : 'play') : 'pause';
+      if (name !== lastPlayIcon) {
+        lastPlayIcon = name;
+        setIcon(elPlay, name);
+        elPlay.title = name === 'pause' ? 'Pause' : name === 'replay' ? 'Replay sentence (R)' : 'Play';
+      }
+    }
     if (elTime) elTime.textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
     if (elFill) elFill.style.width = (dur ? (cur / dur) * 100 : 0) + '%';
     if (elBuffer) elBuffer.style.width = (dur ? (bufferedTo(cur) / dur) * 100 : 0) + '%';
@@ -941,15 +968,15 @@
   }
 
   function buildControls() {
-    const seek = (d) => { if (video && video.duration) video.currentTime = clamp(video.currentTime + d, 0, video.duration); };
-    elPlay = mkBtn('ytds-icon ytds-play', 'Pause / play', togglePlay, icon('play'));
+    elPlay = mkBtn('ytds-icon ytds-play', 'Play', togglePlay, icon('play'));
+    lastPlayIcon = 'play';   // a rebuilt panel starts from a known glyph
     elTime = el('div', 'ytds-time', '0:00 / 0:00');
 
     elControls = el('div', 'ytds-controls');
     elControls.append(
-      mkBtn('ytds-icon', 'Back 10s', () => seek(-10), icon('rewind')),
+      mkBtn('ytds-icon', 'Back 10s', () => seekBy(-10), icon('rewind')),
       elPlay,
-      mkBtn('ytds-icon', 'Forward 10s', () => seek(10), icon('forward')),
+      mkBtn('ytds-icon', 'Forward 10s', () => seekBy(10), icon('forward')),
       mkSpeedMenu(),
       elTime,
       buildScrub()
@@ -978,14 +1005,19 @@
     });
   }
 
-  // The button is a proxy for the player's own play/pause — literally the
-  // control the Space key drives. Anything we do to the media element ourselves
-  // the player may undo a moment later; going through its own toggle cannot
-  // disagree with it. Study mode needs nothing here: the play/pause events and
-  // the render loop re-arm the sentence stop wherever playback ends up.
+  // Three states, not two — a plain toggle cannot tell "I paused in the middle
+  // of a sentence" from "the sentence played out", and those want opposite
+  // things from ▶. The player owns neither distinction, so the intent lives
+  // here and only the execution goes through the player (see wishPlay).
   function togglePlay() {
-    pauseIntentAt = 0;   // whatever the player does now, the user asked for it
-    window.postMessage({ type: 'YTDS_TOGGLE_PLAY' }, '*');
+    if (!video) return;
+    if (!state.study || !sentences.length) {   // free reading: plain play/pause
+      video.paused ? playVideo() : pauseVideo();
+      return;
+    }
+    if (!video.paused) { pauseVideo(); return; }
+    if (sentenceDone) playSentence(sentIdx);   // played out → this sentence again
+    else { playVideo(); armStop(); }           // paused mid-sentence → carry on
   }
 
   function buildScrub() {
@@ -1155,6 +1187,7 @@
     if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
     state.reader = false; saveState();
     stopAt = null; // let the video play normally again outside study mode
+    sentenceDone = false;
     clearTimeout(stopTimer); stopTimer = null;
     closeDrawer();
     document.documentElement.classList.remove('ytds-reader');
@@ -1174,12 +1207,21 @@
       else exitReader();
       return;
     }
+    // Study mode owns the transport keys; with it off they belong to the player
+    // — except the arrows, which the player cannot hear under our fullscreen,
+    // so we do its own ±5 s ourselves.
+    const study = state.study && sentences.length;
     if (key === 'ArrowLeft' || key === 'ArrowRight') {
-      if (!sentences.length) return;
       e.preventDefault(); e.stopPropagation();
-      playSentence(sentIdx + (key === 'ArrowRight' ? 1 : -1));
+      const fwd = key === 'ArrowRight';
+      if (study) playSentence(sentIdx + (fwd ? 1 : -1));
+      else seekBy(fwd ? 5 : -5);
+    } else if (e.code === 'Space') {
+      if (!study) return;   // free reading: the player's own key, untouched
+      e.preventDefault(); e.stopPropagation();
+      togglePlay();
     } else if (e.code === 'KeyR') {   // by physical key: layout-independent
-      if (!sentences.length) return;
+      if (!study) return;
       e.preventDefault(); e.stopPropagation();
       repeatSentence();
     }

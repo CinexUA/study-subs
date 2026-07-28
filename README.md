@@ -42,8 +42,10 @@ when you want to study — click that button → a **full-screen study mode** op
   timecode): the previous line stays above, dimmed.
 - **Custom playback controls**: ±10 s, pause/play, **speed** (0.5×–2×), time,
   and a scrubber whose notches are sentence boundaries — clicking it snaps to
-  the start of the sentence under the cursor. Pause/play presses the player's
-  own control, so it and the Space key are the same action.
+  the start of the sentence under the cursor. Pause/play always goes through the
+  player's own control, so it can never disagree with the player — but in study
+  mode it carries three states, not two: playing → pause, paused mid-sentence →
+  carry on, sentence played out → **replay it** (the glyph changes to ↻).
 - **Shadowing row**: **Previous · Repeat · Next**. "Repeat" is a plain action —
   one press replays the current sentence from its start.
 - **Study mode ("Study" button in the top bar)**: the overlay switches to one
@@ -56,7 +58,9 @@ when you want to study — click that button → a **full-screen study mode** op
   transport row with the rest of the playback controls.
 - **Settings drawer** (⚙ in the top bar) holds only what you never touch mid
   video: the diagnostics log.
-- **Hotkeys**: `R` repeat, `←`/`→` previous / next sentence, `Esc` exit.
+- **Hotkeys**: study mode owns the transport — `Space` play/pause/replay,
+  `←`/`→` previous / next sentence, `R` repeat. With study mode off `Space` and
+  `R` go to the player again and `←`/`→` seek ±5 s. `Esc` always exits.
 - The design follows the "YT Dual Subs — Design Language v1" bundle in the
   context repo (`designs/v1.0`): one set of tokens, three themes, all sizes
   derived from a single container-relative unit.

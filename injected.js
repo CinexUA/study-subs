@@ -105,32 +105,30 @@
       return;
     }
 
-    // The overlay's play/pause button: press the player's own control, which
-    // is exactly what the Space key ends up doing. Nothing here decides
-    // whether to play or to pause — the player owns that state.
-    if (e.data.type === 'YTDS_TOGGLE_PLAY') {
-      const btn = document.querySelector('.ytp-play-button');
-      if (btn) { btn.click(); return; }
+    // A wish, not a toggle: the content script always knows which way it wants
+    // playback to go, so we press the player's own control — the one the Space
+    // key drives — and only when the player disagrees. That way its state
+    // machine ends up agreeing with us instead of undoing us a moment later,
+    // and a wish that is already granted costs nothing.
+    // The button is looked up INSIDE #movie_player: sidebar preview players on
+    // a watch page carry the same class, and a blind document-wide query can
+    // press the wrong one — which looks exactly like a dead button.
+    if (e.data.type === 'YTDS_SET_PLAY') {
+      const want = !!e.data.want;
       try {
         const p = document.getElementById('movie_player');
-        // 1 = playing, in the player's own vocabulary.
-        if (p && p.getPlayerState) { p.getPlayerState() === 1 ? p.pauseVideo() : p.playVideo(); return; }
-      } catch (_) {}
-      const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
-      if (v) { v.paused ? v.play().catch(() => {}) : v.pause(); }
-      return;
-    }
-
-    // Play/pause through the player itself, so its state machine agrees with
-    // us and does not put playback back on a moment after our own pause.
-    if (e.data.type === 'YTDS_PLAY' || e.data.type === 'YTDS_PAUSE') {
-      const wantPlay = e.data.type === 'YTDS_PLAY';
-      try {
-        const p = document.getElementById('movie_player');
-        if (p && p.playVideo && p.pauseVideo) { wantPlay ? p.playVideo() : p.pauseVideo(); return; }
+        if (p && p.getPlayerState) {
+          const st = p.getPlayerState();      // 1 = playing, 3 = buffering
+          if ((st === 1 || st === 3) === want) return;
+          const btn = p.querySelector && p.querySelector('.ytp-play-button');
+          if (btn) { btn.click(); return; }
+          if (p.playVideo && p.pauseVideo) { want ? p.playVideo() : p.pauseVideo(); return; }
+        }
       } catch (_) {}
       // No player API (an early frame, a layout we do not know): the content
-      // script has already driven the media element, so there is nothing left.
+      // script has already driven the media element, this is just a backstop.
+      const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      if (v && v.paused === want) { want ? v.play().catch(() => {}) : v.pause(); }
       return;
     }
 
