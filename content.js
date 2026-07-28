@@ -84,7 +84,7 @@
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
   let btnStudy, btnFocus;
-  let awakeTimer = null, hintTimer = null, copyTimer = null;
+  let awakeTimer = null, hintTimer = null, copyTimer = null, reloadTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
   let sleepPt = null;         // where it was when the interface hid
   let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
@@ -219,63 +219,149 @@
       // different fmt only spends another slice of the same quota.
       if (!res.ok) { dbg(`fetch ${what}: HTTP ${res.status}`); return []; }
       const body = (await res.text()).trim();
-      const units = body ? parseUnits(body) : [];
+      // Same story one step further in: HTTP 200 with an empty body is the
+      // token talking, not the format. A stale or missing `pot` answers exactly
+      // like this, that url stays empty forever, and the second fmt would spend
+      // one more request to hear the same silence.
+      if (!body) { dbg(`fetch ${what}: HTTP ${res.status}, 0 bytes — stale token, not the format`); return []; }
+      const units = parseUnits(body);
       dbg(`fetch ${what}: HTTP ${res.status}, ${body.length} bytes → ${units.length} units`);
       if (units.length) return units;
     }
     return [];
   }
 
-  // ---------- translation cache ----------
-  // Captions of a published video never change, so a translation is worth
-  // keeping: a cached one costs no request at all, and requests are exactly
-  // what ran us into HTTP 429. The source track is never cached — the player's
-  // own interception hands us its body for free on every load.
-  const CACHE_V = 1;          // bump if the shape of a unit ever changes
-  const CACHE_KEEP = 10;      // tracks kept on disk (~5 videos, ~200 KB each)
+  // ---------- caption cache ----------
+  // Captions of a published video never change, so both tracks are worth
+  // keeping. A cached pair costs no request at all, waits for no interception
+  // and never touches `pot` — the most fragile thing here. Requests are also
+  // exactly what ran us into HTTP 429.
+  const CACHE_V = 2;          // bump if the shape of a record ever changes
+  const CACHE_KEEP = 20;      // tracks kept on disk (~10 videos, ~300 KB each)
   const CACHE_IDX = 'ytdscap-idx';
+  const CACHE_PREFIX = `ytdscap:${CACHE_V}:`;
   const memCache = new Map(); // same, for this page's life: instant relanguaging
-  const cacheKey = (lang) => `ytdscap:${CACHE_V}:${currentVideoId}:${lang}`;
+  // The source track lives under the literal `src`: its language is exactly
+  // what we do not know before the record is read, so it travels inside the
+  // record instead of in the key. The translation keeps the same shape.
+  const cacheKey = (slot) => `${CACHE_PREFIX}${currentVideoId}:${slot}`;
 
-  async function cachedUnits(lang) {
-    const memo = memCache.get(cacheKey(lang));
+  // Whatever leaves the disk leaves this page's memory with it — otherwise the
+  // Map grows for the whole session (a dozen videos is a few MB of units).
+  const forget = (keys) => { for (const k of keys) memCache.delete(k); };
+
+  async function cachedTrack(slot) {
+    const key = cacheKey(slot);
+    const memo = memCache.get(key);
     if (memo) return memo;
     try {
-      const key = cacheKey(lang);
       const got = await chrome.storage.local.get(key);
-      const units = got && got[key];
-      if (units && units.length) { memCache.set(key, units); return units; }
+      const rec = got && got[key];
+      if (rec && rec.units && rec.units.length) { memCache.set(key, rec); return rec; }
     } catch (_) {}
     return null;
   }
 
-  async function cacheUnits(lang, units) {
-    const key = cacheKey(lang);
-    memCache.set(key, units);
+  async function cacheTrack(slot, lang, units) {
+    const key = cacheKey(slot);
+    const rec = { lang, units };
+    memCache.set(key, rec);
     try {
-      const got = await chrome.storage.local.get(CACHE_IDX);
-      const idx = [key, ...(got[CACHE_IDX] || []).filter((k) => k !== key)];
-      const drop = idx.splice(CACHE_KEEP);   // oldest fall off the end
-      await chrome.storage.local.set({ [key]: units, [CACHE_IDX]: idx });
-      if (drop.length) await chrome.storage.local.remove(drop);
+      const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+      // Keys of an older CACHE_V can no longer be read, so the first write
+      // after an upgrade is what sweeps them off the disk.
+      const stale = was.filter((k) => k.indexOf(CACHE_PREFIX) !== 0);
+      const idx = [key, ...was.filter((k) => k !== key && k.indexOf(CACHE_PREFIX) === 0)];
+      const drop = [...stale, ...idx.splice(CACHE_KEEP)];   // oldest fall off the end
+      await writeCache(key, rec, idx, drop);
     } catch (e) {
-      dbg('translation cache write failed: ' + e.message);
+      dbg('caption cache write failed: ' + e.message);
     }
   }
 
+  // Eviction counts records, not bytes, so a set of unusually large tracks can
+  // still meet the 10 MB quota — and then the cache would stay broken forever,
+  // because nothing else ever shrinks it. Halve the index and try once more.
+  async function writeCache(key, rec, idx, drop) {
+    forget(drop);
+    try {
+      await chrome.storage.local.set({ [key]: rec, [CACHE_IDX]: idx });
+      if (drop.length) await chrome.storage.local.remove(drop);
+    } catch (e) {
+      const half = idx.splice(Math.max(1, idx.length >> 1));
+      dbg(`cache write failed, shrinking to ${idx.length} tracks and retrying — ${e.message}`);
+      forget(half);
+      await chrome.storage.local.remove([...drop, ...half]);
+      await chrome.storage.local.set({ [key]: rec, [CACHE_IDX]: idx });
+    }
+  }
+
+  // A cache that holds a broken track holds it forever: with one on disk a
+  // reload no longer reaches the network. So the gate is strict — and being
+  // wrong costs only a cache miss, which is exactly today's behaviour.
+  const COVER_MIN = 0.4;
+  function cacheReject(units, json3) {
+    if (units.length < 2) return 'too few units';
+    // The XML fallback parses a truncated body partially and without a word
+    // about it; a truncated json3 fails JSON.parse and never gets this far.
+    if (!json3) return 'XML fallback';
+    const dur = video && video.duration;
+    // Covers a live stream (the track is still growing, and freezing it would
+    // be a lie) and the rare load where metadata has not landed yet.
+    if (!dur || !isFinite(dur)) return 'video length unknown';
+    const last = units[units.length - 1].t;
+    if (last < dur * COVER_MIN) return `covers ${Math.round((last / dur) * 100)}% of the video`;
+    return '';
+  }
+
+  // The escape hatch a cache takes away: with one on disk Ctrl+Shift+R no
+  // longer reaches the network, so a track that cached badly would stay.
+  async function purgeVideoCache() {
+    const mine = (k) => k.indexOf(`${CACHE_PREFIX}${currentVideoId}:`) === 0;
+    forget([...memCache.keys()].filter(mine));
+    try {
+      const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+      const drop = was.filter(mine);
+      await chrome.storage.local.set({ [CACHE_IDX]: was.filter((k) => !mine(k)) });
+      if (drop.length) await chrome.storage.local.remove(drop);
+    } catch (e) { dbg('cache clear failed: ' + e.message); }
+    dbg('captions cache cleared for this video');
+  }
+
   async function translationUnits(base, lang) {
-    const hit = await cachedUnits(lang);
-    if (hit) { dbg(`translation ${lang}: from cache (${hit.length} units)`); return hit; }
+    const hit = await cachedTrack(lang);
+    if (hit) { dbg(`translation ${lang}: from cache (${hit.units.length} units)`); return hit.units; }
     let units = [];
     try { units = await fetchUnits(base, lang); } catch (_) {}
-    if (units.length) cacheUnits(lang, units);
+    if (units.length) keepTrack(lang, lang, units, `translation ${lang}`);
     return units;
   }
 
+  // One place decides whether a freshly parsed track earns a slot, and says so.
+  function keepTrack(slot, lang, units, what) {
+    // Already ours this page: a language change re-parses the same source and
+    // would otherwise rewrite an identical few hundred KB on every switch.
+    if (memCache.has(cacheKey(slot))) return;
+    const why = cacheReject(units, lastParseJson3);
+    if (why) { dbg(`${what} not cached: ${why}`); return; }
+    cacheTrack(slot, lang, units);
+    dbg(`${what} cached (${units.length} units, lang=${lang || '?'})`);
+  }
+
+  // Which parser produced the last units. Only json3 is safe to cache, and the
+  // flag is read straight after the parse it belongs to.
+  let lastParseJson3 = false;
   function parseUnits(body) {
     body = (body || '').trim();
+    lastParseJson3 = false;
     if (!body) return [];
-    if (body[0] === '{') { try { return parseJson3Units(JSON.parse(body)); } catch (_) { return []; } }
+    if (body[0] === '{') {
+      try {
+        const units = parseJson3Units(JSON.parse(body));
+        lastParseJson3 = true;
+        return units;
+      } catch (_) { return []; }
+    }
     return parseXmlUnits(body);
   }
 
@@ -704,39 +790,15 @@
     || tracks.find((t) => t.lang && t.lang.startsWith('en'))
     || tracks[0];
 
-  async function buildFromBase(base, body, capTlang) {
-    let enUnits = [];
-    // The interception already handed us this body. Fetching the same half
-    // megabyte again on every load is what spent our quota — so the network is
-    // the fallback here, not the first move.
-    if (!capTlang && body) enUnits = parseUnits(body);
-    if (!enUnits.length) {
-      try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
-    }
-    if (!enUnits.length) return false;
-    enUnits = splitUnitsByPunct(enUnits);
-
-    if (!srcLang) {
-      try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
-    }
-    const sameLang = state.targetLang === srcLang;
-
-    let uaUnits = [];
-    if (sameLang) {
-      uaUnits = enUnits;
-    } else if (capTlang === state.targetLang && body) {
-      uaUnits = parseUnits(body);
-      if (uaUnits.length) cacheUnits(state.targetLang, uaUnits);
-      else uaUnits = await translationUnits(base, state.targetLang);
-    } else {
-      uaUnits = await translationUnits(base, state.targetLang);
-    }
-    if (!sameLang) uaUnits = splitUnitsByPunct(uaUnits);
-    if (!sameLang && !uaUnits.length) {
-      showHint(throttledUntil > performance.now()
-        ? 'YouTube is rate-limiting caption requests — the translation will come back in a few minutes'
-        : 'Translation did not load — pick the language again', 4500);
-    }
+  // The one place a set of caption units becomes the app's state. Both paths —
+  // cached and fetched — end here, so study mode has exactly one way to be
+  // born; two would be the very flaw the bugs of nights 5–8 grew out of.
+  // Units arrive as the parser gave them (pre-split): the split is cheap to
+  // redo and is not what belongs on disk.
+  function finishBuild(enRaw, uaRaw, sameLang, gen) {
+    if (gen !== loadGen) { dbg('build finished after a newer load began — dropping it'); return true; }
+    const enUnits = splitUnitsByPunct(enRaw);
+    const uaUnits = sameLang ? enUnits : splitUnitsByPunct(uaRaw);
 
     enLines = groupUnitsToLines(enUnits);
     uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
@@ -752,7 +814,71 @@
     return true;
   }
 
+  // The cheapest path there is: no request, no interception, no `pot`. A full
+  // set or nothing — the source alone would mean rendering against an empty
+  // translation zone while a fetch runs behind it, and the network path below
+  // already handles that case properly.
+  async function buildFromCache() {
+    const gen = loadGen;
+    const src = await cachedTrack('src');
+    if (!src) return false;
+    const sameLang = state.targetLang === src.lang;
+    let tr = null;
+    if (!sameLang) {
+      tr = await cachedTrack(state.targetLang);
+      if (!tr) return false;
+    }
+    srcLang = src.lang;
+    dbg(`source: from cache (${src.units.length} units, lang=${srcLang || '?'})`);
+    if (tr) dbg(`translation ${state.targetLang}: from cache (${tr.units.length} units)`);
+    return finishBuild(src.units, tr ? tr.units : [], sameLang, gen);
+  }
+
+  async function buildFromBase(base, body, capTlang) {
+    const gen = loadGen;
+    let enUnits = [];
+    // The interception already handed us this body. Fetching the same half
+    // megabyte again on every load is what spent our quota — so the network is
+    // the fallback here, not the first move.
+    if (!capTlang && body) enUnits = parseUnits(body);
+    if (!enUnits.length) {
+      try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
+    }
+    if (!enUnits.length) return false;
+
+    if (!srcLang) {
+      try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
+    }
+    // Kept here, while the parse this decision is about is still the last one:
+    // the translation below runs its own parse and moves the json3 flag on.
+    keepTrack('src', srcLang, enUnits, 'source track');
+    const sameLang = state.targetLang === srcLang;
+
+    let uaUnits = [];
+    if (sameLang) {
+      uaUnits = enUnits;
+    } else if (capTlang === state.targetLang && body) {
+      uaUnits = parseUnits(body);
+      if (uaUnits.length) keepTrack(state.targetLang, state.targetLang, uaUnits, `translation ${state.targetLang}`);
+      else uaUnits = await translationUnits(base, state.targetLang);
+    } else {
+      uaUnits = await translationUnits(base, state.targetLang);
+    }
+    if (!sameLang && !uaUnits.length) {
+      showHint(throttledUntil > performance.now()
+        ? 'YouTube is rate-limiting caption requests — the translation will come back in a few minutes'
+        : 'Translation did not load — pick the language again', 4500);
+    }
+
+    return finishBuild(enUnits, uaUnits, sameLang, gen);
+  }
+
+  // Every load gets a generation. A build that finishes after a newer load has
+  // started (two quick language switches) belongs to a state nobody asked for.
+  let loadGen = 0;
+
   async function loadCaptions() {
+    loadGen++;
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null; sentenceDone = false;
     clearTimeout(stopTimer); stopTimer = null;
@@ -762,6 +888,8 @@
     clearDisplay();
     setStatus('loading…');
     dbg('--- loadCaptions for ' + currentVideoId);
+
+    if (await buildFromCache()) return;
 
     if (capturedBase && capturedForVideo === currentVideoId) {
       dbg('using cached valid URL');
@@ -799,11 +927,15 @@
   }
 
   async function handleCaptured(url, body) {
-    if (enLines.length) return;
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
 
+    // Recorded even when we already have captions — from the cache, say. A url
+    // the player fetched on its own carries a valid `pot`, and holding one is
+    // what makes a later language change cost a single request instead of the
+    // whole enable-and-wait dance.
     capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
+    if (enLines.length) return;
 
     if (!(await buildFromBase(base, body, capTlang))) {
       dbg(`capture had no usable EN (body=${(body || '').length} bytes) — retrying the same URL`);
@@ -1294,6 +1426,25 @@
     return btn;
   }
 
+  // Copy log's neighbour, built the same way. A cached track is otherwise
+  // beyond reach: with one on disk Ctrl+Shift+R no longer touches the network,
+  // so this is the only way back to a fresh fetch.
+  function buildReloadCaptions() {
+    const btn = mkBtn('ytds-text-btn', 'Forget the cached captions for this video and fetch them again', async () => {
+      clearTimeout(reloadTimer);
+      btn.textContent = 'Reloading…';
+      await purgeVideoCache();
+      loadCaptions();
+      btn.textContent = 'Cache cleared';
+      btn.classList.add('ytds-ok');
+      reloadTimer = setTimeout(() => {
+        btn.textContent = 'Reload captions';
+        btn.classList.remove('ytds-ok');
+      }, 1800);
+    }, txt('Reload captions'));
+    return btn;
+  }
+
   // The clipboard API needs the document focused, and inside our own
   // fullscreen element that is not a given — the old way still works there.
   function copyFallback(text) {
@@ -1328,12 +1479,15 @@
     // Everything that has a control on the main screen — the two lines, the
     // language, size, speed, study mode, the theme — is deliberately NOT
     // duplicated here. What is left is what you never touch while watching.
+    const btnRow = el('div', 'ytds-btn-row');
+    btnRow.append(buildCopyLog(), buildReloadCaptions());
+
     const body = el('div', 'ytds-drawer-body');
     body.append(
       group('Advanced', 'console'),
       elStatus,
       elLog,
-      buildCopyLog()
+      btnRow
     );
 
     elKeys = el('div', 'ytds-keys');

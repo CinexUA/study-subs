@@ -597,6 +597,8 @@
   padding: 0 calc(2 * var(--u)) calc(2 * var(--u));
 }
 .ytds-drawer-body .ytds-text-btn { align-self: flex-start; }
+/* Copy log and Reload captions stand in a row, not in a stack. */
+.ytds-btn-row { display: flex; gap: calc(.9 * var(--u)); }
 .ytds-group-title {
   margin: calc(1.8 * var(--u)) 0 calc(.5 * var(--u));
   display: flex;
