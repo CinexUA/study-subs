@@ -5,13 +5,16 @@
 (() => {
   'use strict';
 
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: false };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, loop: false };
   const LANGS = [
-    ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
-    ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
-    ['it', 'Italian'], ['ru', 'Russian']
+    ['uk', 'Українська'], ['en', 'English'], ['pl', 'Polski'],
+    ['de', 'Deutsch'], ['es', 'Español'], ['fr', 'Français'],
+    ['it', 'Italiano'], ['ru', 'Русская']
   ];
-  const THEMES = [['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light']];
+  const THEMES = [['sepia', 'Книжкова'], ['dark', 'Нічна'], ['light', 'Денна']];
+  const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
+  const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
   const LEAD = 0.12;
 
   // Subtitle-box icon for the player-controls button (white, YouTube style).
@@ -21,18 +24,37 @@
     '<rect x="9.5" y="14" width="11" height="2.4"/>' +
     '<rect x="9.5" y="19" width="17" height="2.4"/></svg>';
 
+  // One pencil for the whole set: 20×20 grid, 1.7 stroke, round joins,
+  // currentColor. Fill is allowed for transport only. Sizes come from CSS.
+  const S = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">';
+  const ICONS = {
+    play: '<svg viewBox="0 0 20 20" fill="none"><path d="M6.9 4.5 15.6 10 6.9 15.5Z" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>',
+    pause: '<svg viewBox="0 0 20 20" fill="none"><rect x="6" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/><rect x="11.1" y="4.6" width="2.9" height="10.8" rx="1.3" fill="currentColor"/></svg>',
+    rewind: S + '<path d="M9.4 5.6 5 10l4.4 4.4M16 5.6 11.6 10 16 14.4"/></svg>',
+    forward: S + '<path d="M10.6 5.6 15 10l-4.4 4.4M4 5.6 8.4 10 4 14.4"/></svg>',
+    repeat: S + '<path d="M4.6 9.4v-.8A2.8 2.8 0 0 1 7.4 5.8h6.3M11.7 3.6 14 5.8l-2.3 2.2M15.4 10.6v.8a2.8 2.8 0 0 1-2.8 2.8H6.3M8.3 16.4 6 14.2l2.3-2.2"/></svg>',
+    chevL: S + '<path d="M12.4 5.2 7.4 10l5 4.8"/></svg>',
+    chevR: S + '<path d="M7.6 5.2 12.6 10l-5 4.8"/></svg>',
+    chevD: S + '<path d="M5.4 8 10 12.6 14.6 8"/></svg>',
+    close: S + '<path d="M5.8 5.8 14.2 14.2M14.2 5.8 5.8 14.2"/></svg>',
+    settings: S + '<path d="M3.6 6.6h2.1M10.4 6.6h6M3.6 13.4h6.9M15.1 13.4h1.3"/><circle cx="8.1" cy="6.6" r="2.3"/><circle cx="12.8" cy="13.4" r="2.3"/></svg>',
+    check: S + '<path d="M4.8 10.5 8.2 13.9 15.2 6.5"/></svg>',
+    console: S + '<rect x="3.2" y="4.4" width="13.6" height="11.2" rx="2.6"/><path d="M6.6 8.6 8.9 10.9l-2.3 2.3M11.2 13.2h3.1"/></svg>'
+  };
+
   let state = { ...DEFAULTS };
-  let enLines = [];
-  let uaLines = [];
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
-  let lastSig = null, lastCtl = '';
+  let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
   let currentVideoId = null;
   let awaitingCapture = false;
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let video = null;
-  let panel, elRoll, elStatus, elLog, langSel, elClose, elControls, elPlay, elTime, elFill, elSpeed, btnStudy, elStudy;
+  let panel, elStage, elEn, elUa, elNote, elStatus, elLog, elCounter;
+  let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub;
+  let btnLoop;
+  const menus = [];   // value pickers (speed, language) that syncUi() refreshes
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
   // time at which playback should stop (null = free play).
@@ -66,7 +88,11 @@
   }
 
   const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
-  const clearDisplay = () => { if (elRoll) elRoll.textContent = ''; lastSig = null; };
+  const clearDisplay = () => {
+    if (elEn) elEn.textContent = '';
+    if (elUa) elUa.textContent = '';
+    lastSig = null; lastIdx = -1;
+  };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   // ---------- MAIN-world bridge ----------
@@ -212,42 +238,6 @@
     return out;
   }
 
-  function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
-    const lines = [];
-    let cur = null;
-    const flush = () => {
-      if (cur && cur.units.length) {
-        cur.full = joinUnits(cur.units);
-        cur.end = cur.units[cur.units.length - 1].t;
-        lines.push(cur);
-      }
-      cur = null;
-    };
-    for (const u of units) {
-      if (!cur) cur = { start: u.t, units: [] };
-      cur.units.push(u);
-      const buf = joinUnits(cur.units);
-      const endsSent = endsSentence(buf);
-      if ((endsSent && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
-    }
-    flush();
-    return lines;
-  }
-
-  function pickLine(lines, t) {
-    if (!lines.length) return { idx: -1, n: 0 };
-    let lo = 0, hi = lines.length - 1, idx = -1;
-    while (lo <= hi) {
-      const m = (lo + hi) >> 1;
-      if (lines[m].start <= t) { idx = m; lo = m + 1; }
-      else hi = m - 1;
-    }
-    if (idx < 0) return { idx: -1, n: 0 };
-    let n = 0;
-    for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
-    return { idx, n: Math.max(1, n) };
-  }
-
   // Split word units into sentences (period/!/?/… ends one; a long silence
   // also breaks — ASR tracks may lack punctuation entirely). Each sentence
   // keeps its units (word-by-word reveal) and an end = just AFTER the last
@@ -329,12 +319,16 @@
     return Math.max(0, sentences.length - 1);
   }
 
+  // Playback stops at the end of a sentence when auto-pause is on, and also
+  // while looping — the loop is built on top of that same stop.
+  function stopping() { return !!(state.study || state.loop); }
+
   // Seek to just before a sentence's first word and play until its end.
   function playSentence(i) {
     if (!video || !sentences.length) return;
     sentIdx = clamp(i, 0, sentences.length - 1);
     const s = sentences[sentIdx];
-    stopAt = s.end;
+    stopAt = stopping() ? s.end : null;
     const prevEnd = sentIdx > 0 ? sentences[sentIdx - 1].end : 0;
     // A touch early, so the first word's attack isn't clipped by the seek.
     const from = Math.min(Math.max(s.start - 0.15, prevEnd), s.start);
@@ -365,36 +359,52 @@
     }
     stopAt = null;
     lastCtl = '';
+    // Loop: after the pause that lets the learner repeat aloud, play it again.
+    if (state.loop && state.reader) {
+      const at = sentIdx;
+      setTimeout(() => { if (state.loop && state.reader && sentIdx === at) playSentence(at); }, 600);
+    }
   }
 
   // After any user seek or a resume outside our controls, the text must show
   // the sentence the audio is actually in — otherwise audio walks away while
   // the display stays frozen on a stale sentence.
-  function resyncStudy() {
-    if (!state.reader || !state.study || !sentences.length || !video) return;
+  function resync() {
+    if (!state.reader || !sentences.length || !video) return;
     const i = findSentenceAt(video.currentTime || 0);
     if (i !== sentIdx) { sentIdx = i; lastSig = null; }
-    stopAt = sentences[sentIdx].end;
+    stopAt = stopping() ? sentences[sentIdx].end : null;
     armStop();
   }
 
   function onSeeked() {
     if (suppressSeek) { suppressSeek = false; return; }
-    resyncStudy();
+    resync();
   }
 
   // Begin shadowing at whatever sentence the playhead is currently in.
   function armStudy() {
     if (!video || !sentences.length) return;
-    playSentence(findSentenceAt(video.currentTime || 0));
+    sentIdx = findSentenceAt(video.currentTime || 0);
+    stopAt = stopping() ? sentences[sentIdx].end : null;
+    armStop();
+    lastSig = null;
   }
 
   function setStudy(on) {
     state.study = on; saveState();
-    document.documentElement.classList.toggle('ytds-study', !!on);
-    if (btnStudy) btnStudy.classList.toggle('ytds-on', !!on);
     if (on) armStudy();
-    else { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
+    else if (!state.loop) { stopAt = null; clearTimeout(stopTimer); stopTimer = null; } // free play again
+    syncUi();
+  }
+
+  // Repeat is a toggle: turning it on restarts the sentence and keeps
+  // replaying it; turning it off lets playback move on.
+  function setLoop(on) {
+    state.loop = on; saveState();
+    if (on) playSentence(sentIdx);
+    else if (!state.study) { stopAt = null; clearTimeout(stopTimer); stopTimer = null; }
+    syncUi();
   }
 
   function applySpeed() {
@@ -405,8 +415,9 @@
   function updateStatus() {
     const uaNote = (state.targetLang !== srcLang && !uaUnitLen) ? ' · translation unavailable' : '';
     const srcU = (srcLang || 'en').toUpperCase();
-    setStatus(`source: ${srcLang || '?'} · ${srcU} ${enUnitLen} words · ${state.targetLang.toUpperCase()} ${uaUnitLen} words · lines ${enLines.length}${uaNote}`);
+    setStatus(`source: ${srcLang || '?'} · ${srcU} ${enUnitLen} words · ${state.targetLang.toUpperCase()} ${uaUnitLen} words · ${sentences.length} sentences${uaNote}`);
     updateLabels();
+    updateCounter();
   }
 
   // ---------- captions ----------
@@ -438,21 +449,19 @@
     }
     if (!sameLang) uaUnits = splitUnitsByPunct(uaUnits);
 
-    enLines = groupUnitsToLines(enUnits);
-    uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
     sentences = buildSentences(enUnits);
     uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
     sentIdx = 0; stopAt = null;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
-    lastSig = null;
-    dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
+    lastSig = null; lastIdx = -1;
+    dbg(`ready: EN ${enUnits.length} words · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
     updateStatus();
-    if (state.reader && state.study) armStudy();
+    if (state.reader) armStudy();
     return true;
   }
 
   async function loadCaptions() {
-    enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
+    srcLang = ''; enUnitLen = uaUnitLen = 0;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
@@ -482,7 +491,7 @@
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (awaitingCapture && !enLines.length) {
+      if (awaitingCapture && !sentences.length) {
         awaitingCapture = false;
         dbg('9s timeout: no capture happened — the video likely has no captions');
         setStatus('could not fetch captions — enable CC in the player manually');
@@ -491,7 +500,7 @@
   }
 
   async function handleCaptured(url, body) {
-    if (enLines.length) return;
+    if (sentences.length) return;
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
 
@@ -515,36 +524,37 @@
   });
 
   // ---------- render loop (only while reading) ----------
+  // One sentence at a time: EN and the translation are index-aligned, so the
+  // next sentence's words can never bleed across the two tracks.
   function loop() {
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
     updateControls();
-    // Shadowing: the precise stop timer does the real work; this is a backup.
-    if (state.study && stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
-    if (!video || (!enLines.length && !uaLines.length)) { showPlaceholder(); return; }
+    // The precise stop timer does the real work; this is a backup.
+    if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop();
+    if (!video || !sentences.length) { showPlaceholder(); return; }
     const t = video.currentTime;
 
-    // Study mode: reveal only the current sentence, EN and UA index-aligned,
-    // so the next sentence's words can never bleed across the two tracks.
-    if (state.study && sentences.length) {
-      // Playing with no stop armed = resumed outside our controls — follow.
-      if (!video.paused && stopAt == null) resyncStudy();
-      const enS = sentences[sentIdx];
-      const enN = revealCount(enS, t);
-      const uaN = uaRevealCount(enS, uaSentences[sentIdx], t);
-      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
-      if (sig === lastSig) return;
-      lastSig = sig;
-      renderStudy(enN, uaN);
-      return;
+    // Playing with no stop armed = free play or a resume outside our
+    // controls — follow the audio instead of freezing on a stale sentence.
+    if (!video.paused && stopAt == null) {
+      const i = findSentenceAt(t);
+      if (i !== sentIdx) { sentIdx = i; lastSig = null; }
     }
-
-    const en = pickLine(enLines, t);
-    const ua = pickLine(uaLines, t);
-    const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+    const enS = sentences[sentIdx];
+    const uaS = uaSentences[sentIdx];
+    const enN = revealCount(enS, t);
+    const uaN = uaRevealCount(enS, uaS, t);
+    const sig = `${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
     if (sig === lastSig) return;
-    lastSig = sig;
-    renderLive(en, ua);
+    const fresh = sentIdx !== lastIdx;
+    lastSig = sig; lastIdx = sentIdx;
+    render(
+      enS ? joinUnits(enS.units.slice(0, enN)) : '',
+      uaS ? joinUnits(uaS.units.slice(0, uaN)) : '',
+      fresh
+    );
+    if (fresh) updateCounter();
   }
 
   // How many EN words of a sentence should be visible at time t.
@@ -564,70 +574,32 @@
     return Math.max(1, Math.ceil(p * uaS.units.length));
   }
 
-  function mkZone(cls) {
-    const d = document.createElement('div');
-    d.className = 'ytds-zone ' + cls;
-    return d;
-  }
-
-  function renderStudy(enN, uaN) {
-    if (!elRoll) return;
-    elRoll.dataset.ph = '';
-    elRoll.textContent = '';
-    const zEn = mkZone('ytds-zone-en');
-    const zUa = mkZone('ytds-zone-ua');
-    elRoll.append(zEn, zUa);
-    const enS = sentences[sentIdx];
-    const uaS = uaSentences[sentIdx];
-    if (state.showEn && enS) addLine(joinUnits(enS.units.slice(0, enN)), 'ytds-en', true, zEn);
-    if (state.showUa && uaS) addLine(joinUnits(uaS.units.slice(0, uaN)), 'ytds-ua', true, zUa);
-  }
-
-  function renderLive(en, ua) {
-    if (!elRoll) return;
-    elRoll.dataset.ph = '';
-    elRoll.textContent = '';
-    // Two fixed zones split at the screen midline: EN sits just ABOVE it
-    // (grows upward, its baseline never moves), the translation just below.
-    const zEn = mkZone('ytds-zone-en');
-    const zUa = mkZone('ytds-zone-ua');
-    elRoll.append(zEn, zUa);
-    if (state.showEn) appendLang(enLines, en, 'ytds-en', zEn);
-    if (state.showUa) appendLang(uaLines, ua, 'ytds-ua', zUa);
+  // Two fixed zones split by the hairline: EN sits just ABOVE it (grows
+  // upward, its baseline never moves), the translation just below.
+  function render(enText, uaText, fresh) {
+    if (!elEn) return;
+    if (elNote) elNote.style.display = 'none';
+    elEn.textContent = state.showEn ? enText : '';
+    elUa.textContent = state.showUa ? uaText : '';
+    if (!fresh) return;
+    for (const node of [elEn, elUa]) {
+      node.classList.remove('ytds-fresh');
+      void node.offsetWidth;    // restart the entrance animation
+      node.classList.add('ytds-fresh');
+    }
   }
 
   // Shown in reader when there are no captions yet: surfaces the status/error.
   function showPlaceholder() {
-    if (!elRoll) return;
-    const msg = (elStatus && elStatus.textContent) || 'loading captions…';
-    if (elRoll.dataset.ph === msg) return;
-    elRoll.dataset.ph = msg;
-    elRoll.textContent = '';
-    const d = document.createElement('div');
-    d.className = 'ytds-line ytds-ua';
-    d.style.opacity = '0.75';
-    d.textContent = msg;
-    elRoll.appendChild(d);
+    if (!elNote) return;
+    const msg = (elStatus && elStatus.textContent) || 'завантажую субтитри…';
+    if (elNote.style.display !== 'none' && elNote.textContent === msg) return;
+    elEn.textContent = ''; elUa.textContent = '';
+    elNote.style.display = '';
+    elNote.textContent = msg;
   }
 
-  function appendLang(lines, sel, cls, target) {
-    if (sel.idx < 0) return;
-    if (sel.idx > 0) addLine(lines[sel.idx - 1].full, cls, false, target);
-    const line = lines[sel.idx];
-    addLine(joinUnits(line.units.slice(0, sel.n)), cls, true, target);
-  }
-
-  function addLine(text, cls, active, target) {
-    const wrap = document.createElement('div');
-    wrap.className = 'ytds-block' + (active ? ' ytds-active' : '');
-    const l = document.createElement('div');
-    l.className = 'ytds-line ' + cls;
-    l.textContent = text;
-    wrap.appendChild(l);
-    (target || elRoll).appendChild(wrap);
-  }
-
-  const refresh = () => { lastSig = null; };
+  function refresh() { lastSig = null; lastIdx = -1; }
 
   // ---------- playback controls ----------
   const fmtTime = (s) => {
@@ -639,222 +611,424 @@
   function updateControls() {
     if (!elControls || !video) return;
     const cur = video.currentTime || 0, dur = video.duration || 0;
-    const pct = dur ? (cur / dur) * 100 : 0;
-    const sig = `${Math.floor(cur)}|${video.paused ? 0 : 1}|${Math.floor(pct)}`;
+    // Outside the signature gate below: captions usually arrive while the
+    // video is paused, i.e. while that gate is short-circuiting every frame.
+    if (dur && (dur !== ticksDur || sentences.length !== ticksLen)) buildTicks(dur);
+    const sig = `${cur.toFixed(1)}|${video.paused ? 0 : 1}|${Math.floor(dur)}`;
     if (sig === lastCtl) return;
     lastCtl = sig;
-    if (elPlay) elPlay.textContent = video.paused ? '▶' : '❚❚';
+    if (elPlay) setIcon(elPlay, video.paused ? 'play' : 'pause');
     if (elTime) elTime.textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
-    if (elFill) elFill.style.width = pct + '%';
+    if (elFill) elFill.style.width = (dur ? (cur / dur) * 100 : 0) + '%';
+    if (elBuffer) elBuffer.style.width = (dur ? (bufferedTo(cur) / dur) * 100 : 0) + '%';
+  }
+
+  // End of the buffered range the playhead currently sits in.
+  function bufferedTo(cur) {
+    try {
+      for (let i = 0; i < video.buffered.length; i++) {
+        if (video.buffered.start(i) <= cur && video.buffered.end(i) >= cur) return video.buffered.end(i);
+      }
+    } catch (_) {}
+    return 0;
+  }
+
+  // Notches on the track = sentence boundaries. A dense track is thinned out
+  // hard (a 500-sentence video would otherwise draw a comb): keep a real
+  // boundary only every 8% of the width, a dozen marks at most.
+  function buildTicks(dur) {
+    ticksDur = dur; ticksLen = sentences.length;
+    if (!elTicks) return;
+    elTicks.textContent = '';
+    let last = -Infinity;
+    for (const s of sentences) {
+      const p = (s.start / dur) * 100;
+      if (p < 1 || p > 99 || p - last < 8) continue;
+      last = p;
+      const tick = document.createElement('span');
+      tick.className = 'ytds-tick';
+      tick.style.left = p + '%';
+      elTicks.appendChild(tick);
+    }
+  }
+
+  // ---------- DOM helpers ----------
+  function el(tag, cls, text) {
+    const e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  // Icons are inlined SVG strings (MV3: no icon fonts, no CDN); every size
+  // comes from CSS, so the markup carries no width/height.
+  function icon(name) {
+    const box = document.createElement('span');
+    box.innerHTML = ICONS[name];
+    return box.firstElementChild;
+  }
+  function setIcon(node, name) {
+    const old = node.querySelector('svg');
+    if (old) old.replaceWith(icon(name)); else node.appendChild(icon(name));
+  }
+  function mkBtn(cls, title, onClick, ...kids) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    if (title) b.title = title;
+    b.append(...kids);
+    b.addEventListener('click', onClick);
+    return b;
+  }
+  function txt(s) { return document.createTextNode(s); }
+
+  function toggleKey(key) { state[key] = !state[key]; saveState(); syncUi(); }
+
+  // A− / step / A+ tray. Lives both in the top bar and in the drawer.
+  function mkFontSeg() {
+    const seg = el('div', 'ytds-seg');
+    seg.append(
+      mkBtn('ytds-step', 'Менший шрифт', () => changeFont(-1), txt('A')),
+      el('span', 'ytds-step-label'),
+      mkBtn('ytds-step ytds-step-lg', 'Більший шрифт', () => changeFont(1), txt('A'))
+    );
+    return seg;
+  }
+
+  function mkToggle(key, onChange) {
+    const b = mkBtn('ytds-toggle', '', () => {
+      state[key] = !state[key];
+      saveState();
+      if (onChange) onChange(state[key]); else syncUi();
+    }, el('span'));
+    b.dataset.key = key;
+    return b;
+  }
+
+  function closeMenus() {
+    if (panel) panel.querySelectorAll('.ytds-menu.ytds-open').forEach((m) => m.classList.remove('ytds-open'));
+  }
+
+  // Own value picker instead of <select>: a native one drags YouTube's styles in.
+  function mkMenu(opts) {
+    const wrap = el('div', 'ytds-menu-wrap');
+    const label = el('span');
+    const menu = el('div', 'ytds-menu' + (opts.below ? ' ytds-below' : '') + (opts.text ? ' ytds-menu-text' : ''));
+    const pill = mkBtn('ytds-pill', opts.title || '', (e) => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains('ytds-open');
+      closeMenus();
+      if (!wasOpen) { fill(); menu.classList.add('ytds-open'); }
+    }, label, icon('chevD'));
+
+    const fill = () => {
+      menu.textContent = '';
+      for (const [value, text] of opts.items) {
+        const kids = [txt(text)];
+        if (value === opts.get()) kids.push(icon('check'));
+        menu.appendChild(mkBtn('', '', (e) => {
+          e.stopPropagation();
+          closeMenus();
+          opts.pick(value);
+          syncUi();
+        }, ...kids));
+      }
+    };
+    wrap.append(pill, menu);
+    menus.push({ sync: () => { label.textContent = opts.label(opts.get()); } });
+    label.textContent = opts.label(opts.get());
+    return wrap;
   }
 
   // ---------- panel (built once, shown only in reader) ----------
   function ensurePanel() {
     if (panel) return true;
-
-    panel = document.createElement('div');
-    panel.className = 'ytds-panel ytds-theme-' + state.theme;
-
-    const bar = document.createElement('div');
-    bar.className = 'ytds-bar';
-
-    const btnEn = mkToggle('EN', 'showEn');
-    const btnUa = mkToggle('UA', 'showUa');
-
-    const mkBtn = (label, title, fn, cls) => {
-      const b = document.createElement('button');
-      b.className = 'ytds-btn' + (cls ? ' ' + cls : '');
-      b.textContent = label; b.title = title;
-      b.addEventListener('click', fn);
-      return b;
-    };
-    const fontMinus = mkBtn('A−', 'Smaller font', () => changeFont(-0.1), 'ytds-step');
-    const fontPlus = mkBtn('A+', 'Larger font', () => changeFont(0.1), 'ytds-step');
-
-    btnStudy = mkBtn('Study', 'Shadowing mode: sentence by sentence, stops at each period', () => setStudy(!state.study));
-
-    const btnLog = document.createElement('button');
-    btnLog.className = 'ytds-btn';
-    btnLog.textContent = 'Log';
-    btnLog.addEventListener('click', () => {
-      elLog.style.display = elLog.style.display === 'none' ? '' : 'none';
-      btnLog.classList.toggle('ytds-on', elLog.style.display !== 'none');
-    });
-
-    const themeSel = document.createElement('select');
-    themeSel.className = 'ytds-select';
-    themeSel.title = 'Theme';
-    for (const [code, label] of THEMES) {
-      const o = document.createElement('option');
-      o.value = code; o.textContent = label;
-      if (code === state.theme) o.selected = true;
-      themeSel.appendChild(o);
-    }
-    themeSel.addEventListener('change', () => { state.theme = themeSel.value; saveState(); applyTheme(); });
-
-    langSel = document.createElement('select');
-    langSel.className = 'ytds-select';
-    langSel.title = 'Translation language';
-    for (const [code, label] of LANGS) {
-      const o = document.createElement('option');
-      o.value = code; o.textContent = label;
-      if (code === state.targetLang) o.selected = true;
-      langSel.appendChild(o);
-    }
-    langSel.addEventListener('change', () => { state.targetLang = langSel.value; saveState(); loadCaptions(); });
-
-    bar.append(btnEn, btnUa, fontMinus, fontPlus, btnStudy, btnLog, themeSel, langSel);
-
-    elRoll = document.createElement('div');
-    elRoll.className = 'ytds-roll';
-    elStatus = document.createElement('div');
-    elStatus.className = 'ytds-status';
-    elLog = document.createElement('div');
-    elLog.className = 'ytds-log';
-    elLog.style.display = 'none';
-
-    elControls = buildControls();
-    elStudy = buildStudyRow();
-    elClose = document.createElement('button');
-    elClose.className = 'ytds-close';
-    elClose.textContent = '✕';
-    elClose.title = 'Exit study mode (Esc)';
-    elClose.addEventListener('click', exitReader);
-
-    panel.append(elClose, bar, elRoll, elStatus, elControls, elStudy, elLog);
+    panel = el('div', 'ytds-panel ytds-theme-' + state.theme);
+    panel.addEventListener('click', closeMenus);
+    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer());
     syncUi();
     return true;
   }
 
-  function buildControls() {
-    const wrap = document.createElement('div');
-    wrap.className = 'ytds-controls';
+  function buildTop() {
+    const segLang = el('div', 'ytds-seg');
+    const bEn = mkBtn('', 'Показувати оригінал', () => toggleKey('showEn'), txt('EN'));
+    bEn.dataset.key = 'showEn';
+    const bUa = mkBtn('', 'Показувати переклад', () => toggleKey('showUa'), txt('UK'));
+    bUa.dataset.key = 'showUa';
+    segLang.append(bEn, bUa);
 
-    const seek = (d) => { if (video && video.duration) video.currentTime = clamp(video.currentTime + d, 0, video.duration); };
-    const mk = (label, title, fn) => {
-      const b = document.createElement('button');
-      b.className = 'ytds-cbtn'; b.textContent = label; b.title = title;
-      b.addEventListener('click', fn);
-      return b;
-    };
-    const back = mk('⏪', 'Back 10s', () => seek(-10));
-    elPlay = mk('▶', 'Pause / play', () => {
-      if (!video) return;
-      if (!video.paused) { video.pause(); return; }
-      // In study mode ▶ after the auto-stop means "next sentence" (skips the
-      // silence); a manual mid-sentence pause (stop still armed) just resumes.
-      if (state.study && state.reader && sentences.length && stopAt == null) playSentence(sentIdx + 1);
-      else video.play();
-    });
-    const fwd = mk('⏩', 'Forward 10s', () => seek(10));
+    const left = el('div', 'ytds-top-side');
+    left.append(segLang, mkFontSeg());
 
-    elSpeed = document.createElement('select');
-    elSpeed.className = 'ytds-select ytds-speed';
-    elSpeed.title = 'Playback speed';
-    for (const v of [0.5, 0.75, 1, 1.25, 1.5, 2]) {
-      const o = document.createElement('option');
-      o.value = String(v); o.textContent = v + '×';
-      if (v === (state.speed || 1)) o.selected = true;
-      elSpeed.appendChild(o);
-    }
-    elSpeed.addEventListener('change', () => { state.speed = parseFloat(elSpeed.value); saveState(); applySpeed(); });
+    elCounter = el('div', 'ytds-counter');
 
-    elTime = document.createElement('span');
-    elTime.className = 'ytds-time';
-    elTime.textContent = '0:00 / 0:00';
+    const right = el('div', 'ytds-top-side ytds-right');
+    right.append(
+      mkBtn('ytds-icon ytds-gear', 'Налаштування', openDrawer, icon('settings')),
+      mkBtn('ytds-icon', 'Вийти (Esc)', exitReader, icon('close'))
+    );
 
-    const track = document.createElement('div');
-    track.className = 'ytds-progress';
-    elFill = document.createElement('div');
-    elFill.className = 'ytds-progress-fill';
-    track.appendChild(elFill);
-    track.addEventListener('click', (e) => {
-      if (!video || !video.duration) return;
-      const r = track.getBoundingClientRect();
-      video.currentTime = clamp((e.clientX - r.left) / r.width, 0, 1) * video.duration;
-    });
-
-    wrap.append(back, elPlay, fwd, elSpeed, elTime, track);
-    return wrap;
+    const top = el('div', 'ytds-top');
+    top.append(left, elCounter, right);
+    return top;
   }
 
-  // Shadowing controls: previous / repeat / next sentence.
+  function buildStage() {
+    const zEn = el('div', 'ytds-zone ytds-zone-en');
+    elEn = el('span', 'ytds-line ytds-en');
+    zEn.appendChild(elEn);
+    const zUa = el('div', 'ytds-zone ytds-zone-ua');
+    elUa = el('span', 'ytds-line ytds-ua');
+    zUa.appendChild(elUa);
+    elNote = el('div', 'ytds-note');
+    elNote.style.display = 'none';
+
+    elStage = el('div', 'ytds-stage');
+    elStage.append(zEn, el('div', 'ytds-rule'), zUa, elNote);
+    return elStage;
+  }
+
+  // Shadowing row: previous / repeat / next sentence. Repeat is the hero.
   function buildStudyRow() {
-    const wrap = document.createElement('div');
-    wrap.className = 'ytds-study-row';
-    const mk = (label, title, fn, cls) => {
-      const b = document.createElement('button');
-      b.className = 'ytds-sbtn' + (cls ? ' ' + cls : '');
-      b.textContent = label; b.title = title;
-      b.addEventListener('click', fn);
-      return b;
+    btnLoop = mkBtn('ytds-sbtn ytds-primary', 'Повторювати це речення (R)', () => setLoop(!state.loop),
+      icon('repeat'), el('span', null, 'Повторити'));
+
+    const tray = el('div', 'ytds-study-tray');
+    tray.append(
+      mkBtn('ytds-sbtn ytds-prev', 'Попереднє речення (←)', () => playSentence(sentIdx - 1), icon('chevL'), el('span', null, 'Попереднє')),
+      btnLoop,
+      mkBtn('ytds-sbtn ytds-next', 'Наступне речення (→)', () => playSentence(sentIdx + 1), el('span', null, 'Наступне'), icon('chevR'))
+    );
+    const row = el('div', 'ytds-study-row');
+    row.appendChild(tray);
+    return row;
+  }
+
+  function buildControls() {
+    const seek = (d) => { if (video && video.duration) video.currentTime = clamp(video.currentTime + d, 0, video.duration); };
+    elPlay = mkBtn('ytds-icon ytds-play', 'Пауза / відтворення', togglePlay, icon('play'));
+    elTime = el('div', 'ytds-time', '0:00 / 0:00');
+
+    elControls = el('div', 'ytds-controls');
+    elControls.append(
+      mkBtn('ytds-icon', 'Назад 10 с', () => seek(-10), icon('rewind')),
+      elPlay,
+      mkBtn('ytds-icon', 'Вперед 10 с', () => seek(10), icon('forward')),
+      mkSpeedMenu(false),
+      elTime,
+      buildScrub()
+    );
+    return elControls;
+  }
+
+  function mkSpeedMenu(below) {
+    return mkMenu({
+      title: 'Швидкість відтворення',
+      below,
+      items: SPEEDS.map((v) => [v, v + '×']),
+      get: () => state.speed || 1,
+      label: (v) => v + '×',
+      pick: (v) => { state.speed = v; saveState(); applySpeed(); }
+    });
+  }
+
+  function togglePlay() {
+    if (!video) return;
+    if (!video.paused) { video.pause(); return; }
+    // After an auto-stop ▶ means "next sentence" (skips the silence); a manual
+    // mid-sentence pause (stop still armed) just resumes.
+    if (state.reader && stopping() && sentences.length && stopAt == null) playSentence(sentIdx + 1);
+    else video.play().catch(() => {});
+  }
+
+  function buildScrub() {
+    elBuffer = el('div', 'ytds-buffer');
+    elFill = el('div', 'ytds-fill');
+    elFill.appendChild(el('span', 'ytds-thumb'));
+    elTicks = el('div', 'ytds-ticks');
+    const track = el('div', 'ytds-track');
+    track.append(elBuffer, elFill, elTicks);
+
+    elBubble = el('div', 'ytds-bubble', '0:00');
+    elScrub = el('div', 'ytds-scrub');
+    elScrub.append(track, elBubble);
+
+    const posOf = (e) => {
+      const r = track.getBoundingClientRect();
+      return clamp((e.clientX - r.left) / r.width, 0, 1);
     };
-    const prev = mk('← Previous', 'Previous sentence', () => playSentence(sentIdx - 1));
-    const rep = mk('↻ Repeat', 'Play this sentence from start to end', () => playSentence(sentIdx), 'ytds-primary');
-    const next = mk('Next →', 'Next sentence', () => playSentence(sentIdx + 1));
-    wrap.append(prev, rep, next);
+    elScrub.addEventListener('mousemove', (e) => {
+      if (!video || !video.duration) return;
+      const p = posOf(e);
+      elBubble.style.left = (p * 100) + '%';
+      elBubble.textContent = fmtTime(p * video.duration);
+    });
+    // Clicking snaps to the START of the sentence under the cursor — that is
+    // what the notches promise, and what shadowing actually needs.
+    elScrub.addEventListener('click', (e) => {
+      if (!video || !video.duration) return;
+      const t = posOf(e) * video.duration;
+      if (sentences.length) playSentence(findSentenceAt(t));
+      else video.currentTime = t;
+    });
+    return elScrub;
+  }
+
+  // ---------- settings drawer ----------
+  function drawerIsOpen() { return !!panel && panel.classList.contains('ytds-drawer-open'); }
+  function openDrawer() { if (panel) panel.classList.add('ytds-drawer-open'); }
+  function closeDrawer() { if (panel) { panel.classList.remove('ytds-drawer-open'); closeMenus(); } }
+
+  function buildDrawer() {
+    const scrim = el('div', 'ytds-scrim');
+    scrim.addEventListener('click', closeDrawer);
+
+    const head = el('div', 'ytds-drawer-head');
+    head.append(el('span', null, 'Налаштування'), mkBtn('', 'Закрити', closeDrawer, icon('close')));
+
+    const row = (title, control, hint) => {
+      const left = el('div');
+      left.appendChild(txt(title));
+      if (hint) left.appendChild(el('div', 'ytds-row-hint', hint));
+      const r = el('div', 'ytds-row');
+      r.append(left, control);
+      return r;
+    };
+    const group = (title, iconName) => {
+      const g = el('div', 'ytds-group-title');
+      if (iconName) g.appendChild(icon(iconName));
+      g.appendChild(txt(title));
+      return g;
+    };
+
+    elStatus = el('div', 'ytds-status');
+    elLog = el('div', 'ytds-log');
+
+    const body = el('div', 'ytds-drawer-body');
+    body.append(
+      group('Субтитри'),
+      row('Англійський рядок', mkToggle('showEn')),
+      row('Рядок перекладу', mkToggle('showUa')),
+      row('Мова перекладу', mkMenu({
+        title: 'Мова перекладу',
+        below: true, text: true,
+        items: LANGS,
+        get: () => state.targetLang,
+        label: (v) => (LANGS.find((l) => l[0] === v) || [v, v])[1],
+        pick: (v) => { state.targetLang = v; saveState(); loadCaptions(); }
+      })),
+      row('Розмір', mkFontSeg()),
+
+      group('Відтворення'),
+      row('Швидкість', mkSpeedMenu(true)),
+      row('Пауза в кінці речення', mkToggle('study', setStudy), 'Дає секунду, щоб повторити вголос'),
+
+      group('Вигляд'),
+      row('Тема', buildSwatches()),
+
+      group('Advanced', 'console'),
+      elStatus,
+      elLog,
+      mkBtn('ytds-text-btn', '', () => {
+        navigator.clipboard.writeText(elLog.textContent || '').catch(() => {});
+      }, txt('Скопіювати лог'))
+    );
+
+    const keys = el('div', 'ytds-keys');
+    for (const [k, t] of [['R', 'повтор'], ['←→', 'речення'], ['Esc', 'вихід']]) {
+      const s = el('span');
+      s.append(el('b', null, k), txt(' ' + t));
+      keys.appendChild(s);
+    }
+
+    const drawer = el('aside', 'ytds-drawer');
+    drawer.append(head, body, keys);
+
+    const frag = document.createDocumentFragment();
+    frag.append(scrim, drawer);
+    return frag;
+  }
+
+  function buildSwatches() {
+    const wrap = el('div', 'ytds-swatches');
+    for (const [code, label] of THEMES) {
+      const b = mkBtn('ytds-swatch ytds-swatch-' + code, label, () => {
+        state.theme = code; saveState(); applyTheme(); syncUi();
+      });
+      b.dataset.theme = code;
+      wrap.appendChild(b);
+    }
     return wrap;
   }
 
-  function mkToggle(label, key, extra) {
-    const b = document.createElement('button');
-    b.className = 'ytds-btn';
-    b.textContent = label;
-    b.dataset.key = key;
-    b.addEventListener('click', () => {
-      state[key] = !state[key];
-      saveState();
-      syncUi();
-      if (extra) extra();
-      refresh();
-    });
-    return b;
-  }
-
+  // ---------- syncing UI to state ----------
   function syncUi() {
     if (!panel) return;
-    panel.querySelectorAll('.ytds-btn').forEach((b) => {
-      if (b.dataset.key) b.classList.toggle('ytds-on', !!state[b.dataset.key]);
-    });
-    if (langSel) langSel.value = state.targetLang;
-    if (btnStudy) btnStudy.classList.toggle('ytds-on', !!state.study);
-    if (elSpeed) elSpeed.value = String(state.speed || 1);
+    panel.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('ytds-on', !!state[b.dataset.key]));
+    panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
+    const step = FONT_STEPS[fontStepIdx()][0];
+    panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
+    if (btnLoop) {
+      btnLoop.classList.toggle('ytds-on', !!state.loop);
+      const lab = btnLoop.querySelector('span');
+      if (lab) lab.textContent = state.loop ? 'Повторюю' : 'Повторити';
+    }
+    for (const m of menus) m.sync();
     updateLabels();
+    updateCounter();
     applyLayout();
     refresh();
   }
 
   function updateLabels() {
     if (!panel) return;
-    const bSrc = panel.querySelector('[data-key="showEn"]');
-    const bTr = panel.querySelector('[data-key="showUa"]');
-    if (bSrc) bSrc.textContent = (srcLang || 'en').toUpperCase();
-    if (bTr) bTr.textContent = state.targetLang.toUpperCase();
+    const bSrc = panel.querySelector('.ytds-seg button[data-key="showEn"]');
+    const bTr = panel.querySelector('.ytds-seg button[data-key="showUa"]');
+    if (bSrc) bSrc.textContent = (srcLang || 'en').slice(0, 2).toUpperCase();
+    if (bTr) bTr.textContent = state.targetLang.slice(0, 2).toUpperCase();
+  }
+
+  function updateCounter() {
+    if (!elCounter) return;
+    elCounter.textContent = sentences.length
+      ? `Речення ${Math.min(sentIdx + 1, sentences.length)} / ${sentences.length}`
+      : '';
   }
 
   function applyTheme() {
-    if (panel) panel.className = 'ytds-panel ytds-theme-' + state.theme;
+    if (!panel) return;
+    panel.className = 'ytds-panel ytds-theme-' + state.theme + (drawerIsOpen() ? ' ytds-drawer-open' : '');
   }
 
   function applyLayout() {
     document.documentElement.style.setProperty('--font-scale', state.fontScale || 1);
   }
 
+  // The subtitle scale is a 5-step ladder (XS…XL), not a free slider.
+  function fontStepIdx() {
+    const cur = state.fontScale || 1;
+    let best = 0;
+    for (let i = 1; i < FONT_STEPS.length; i++) {
+      if (Math.abs(FONT_STEPS[i][1] - cur) < Math.abs(FONT_STEPS[best][1] - cur)) best = i;
+    }
+    return best;
+  }
+
   function changeFont(delta) {
-    state.fontScale = clamp(Math.round((state.fontScale + delta) * 100) / 100, 0.7, 2.6);
-    saveState(); applyLayout(); refresh();
+    state.fontScale = FONT_STEPS[clamp(fontStepIdx() + delta, 0, FONT_STEPS.length - 1)][1];
+    saveState(); applyLayout(); syncUi();
   }
 
   // ---------- reader (study) mode ----------
   function enterReader() {
     ensurePanel();
     state.reader = true; saveState();
+    closeDrawer();
     document.body.appendChild(panel);
     document.documentElement.classList.add('ytds-reader');
-    document.documentElement.classList.toggle('ytds-study', !!state.study);
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
-    syncUi(); refresh();
-    if (state.study) armStudy();
+    syncUi();
+    armStudy();
   }
 
   function exitReader() {
@@ -862,15 +1036,32 @@
     state.reader = false; saveState();
     stopAt = null; // let the video play normally again outside study mode
     clearTimeout(stopTimer); stopTimer = null;
+    closeDrawer();
     document.documentElement.classList.remove('ytds-reader');
-    document.documentElement.classList.remove('ytds-study');
     if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
     if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
     syncUi();
   }
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && state.reader) { e.stopPropagation(); exitReader(); }
+    if (!state.reader || e.altKey || e.ctrlKey || e.metaKey) return;
+    const key = e.key;
+    if (key === 'Escape') {
+      e.stopPropagation();
+      // Peel the layers one at a time: menu → drawer → reader.
+      if (panel && panel.querySelector('.ytds-menu.ytds-open')) closeMenus();
+      else if (drawerIsOpen()) closeDrawer();
+      else exitReader();
+      return;
+    }
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+      if (!sentences.length) return;
+      e.preventDefault(); e.stopPropagation();
+      playSentence(sentIdx + (key === 'ArrowRight' ? 1 : -1));
+    } else if (key === 'r' || key === 'R' || key === 'к' || key === 'К') {
+      e.preventDefault(); e.stopPropagation();
+      setLoop(!state.loop);
+    }
   }, true);
 
   document.addEventListener('fullscreenchange', () => {

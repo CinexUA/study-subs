@@ -1,168 +1,644 @@
-/* ---------- Themes: variables set per theme, rules below consume them ---------- */
+/* ---------- YT Dual Subs — design language v1 ----------
+   Ported from designs/v1.0 (Claude Design bundle, "YT Dual Subs — Design
+   Language v1"), layout (b) "Повноекранний режим навчання".
+
+   Geometry, motion and elevation are shared by all themes; a theme
+   redefines only the 16 tone tokens below. Sizes inside the overlay are
+   expressed in --u — one design unit = 1% of the width of a 16:9 box that
+   fits the screen — so the whole layout keeps the mock's proportions on any
+   display. --u is resolved against .ytds-panel (a size container) and may
+   therefore only be used by its descendants, never by the panel itself. */
+
+.ytds-panel {
+  --r-xs: 6px;  --r-sm: 10px; --r-md: 14px;
+  --r-lg: 20px; --r-xl: 28px; --r-pill: 999px;
+  --d1: 90ms;  --d2: 150ms; --d3: 220ms; --d4: 340ms; --d5: 520ms;
+  --ease-out: cubic-bezier(.22, .86, .31, 1);
+  --ease-spring: cubic-bezier(.34, 1.32, .5, 1);
+  --ease-inout: cubic-bezier(.45, .05, .25, 1);
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Times New Roman", serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --u: min(1cqw, 1.7778cqh);
+}
+
+/* ---------- Themes: tone tokens per theme, everything else consumes them ---------- */
+.ytds-panel.ytds-theme-sepia {
+  --bg: #e9dcc2;        --bg-elev: #f3e9d6;
+  --bg-sunken: #ddceb0; --bg-hover: rgba(138,75,18,.07);
+  --ink: #241d14;       --ink-2: #5a4a33;   --ink-3: #8d7a58;
+  --accent: #8a4b12;    --accent-2: #a9642a;
+  --accent-ink: #fdf7ec; --accent-wash: rgba(138,75,18,.10);
+  --line: #c8b78f;      --line-2: rgba(60,42,16,.14);
+  --sheen: rgba(255,252,244,.62);
+  --shade: rgba(72,48,16,.20);
+  --scrim: rgba(36,29,20,.44);
+  --log-fg: #5a6a2a;
+}
+
 .ytds-panel.ytds-theme-dark {
-  --bg: #0f0f0f;
-  --border: #303030;
-  --btn-bg: #272727;
-  --btn-fg: #d0d0d0;
-  --btn-border: #3f3f3f;
-  --btn-hover: #333;
-  --btn-on-bg: #3ea6ff;
-  --btn-on-fg: #0b0b0b;
-  --en: #ffffff;
-  --tr: #ffd24a;
-  --status: #8a8a8a;
-  --sel-bg: #272727;
-  --sel-fg: #e0e0e0;
-  --log-bg: #000;
+  --bg: #171310;        --bg-elev: #221c16;
+  --bg-sunken: #100d0a; --bg-hover: rgba(230,170,110,.09);
+  --ink: #efe4d2;       --ink-2: #b9a992;   --ink-3: #8a7a66;
+  --accent: #d98f4d;    --accent-2: #edaa6b;
+  --accent-ink: #1a1209; --accent-wash: rgba(217,143,77,.15);
+  --line: #3b3128;      --line-2: rgba(239,228,210,.10);
+  --sheen: rgba(255,235,205,.07);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(10,7,5,.55);
   --log-fg: #7fd18a;
 }
 
 .ytds-panel.ytds-theme-light {
-  --bg: #ffffff;
-  --border: #d6d6d6;
-  --btn-bg: #f0f0f0;
-  --btn-fg: #333333;
-  --btn-border: #cccccc;
-  --btn-hover: #e6e6e6;
-  --btn-on-bg: #1a73e8;
-  --btn-on-fg: #ffffff;
-  --en: #111111;
-  --tr: #b26a00;
-  --status: #888888;
-  --sel-bg: #f0f0f0;
-  --sel-fg: #222222;
-  --log-bg: #f7f7f7;
+  --bg: #f8f4ec;        --bg-elev: #ffffff;
+  --bg-sunken: #efe8db; --bg-hover: rgba(154,85,24,.06);
+  --ink: #1e1913;       --ink-2: #5b4f3f;   --ink-3: #90826e;
+  --accent: #9a5518;    --accent-2: #b86e2c;
+  --accent-ink: #fffaf2; --accent-wash: rgba(154,85,24,.09);
+  --line: #e0d6c4;      --line-2: rgba(40,30,16,.10);
+  --sheen: rgba(255,255,255,.85);
+  --shade: rgba(70,52,26,.14);
+  --scrim: rgba(60,48,30,.38);
   --log-fg: #1a7f37;
 }
 
-.ytds-panel.ytds-theme-sepia {
-  --bg: #e9dcc2;
-  --border: #c8b78f;
-  --btn-bg: #dccaa1;
-  --btn-fg: #4a3b23;
-  --btn-border: #bfa878;
-  --btn-hover: #d3bf93;
-  --btn-on-bg: #8a5a2b;
-  --btn-on-fg: #f5ecd8;
-  --en: #241d14;
-  --tr: #8a4b12;
-  --status: #8a7853;
-  --sel-bg: #dccaa1;
-  --sel-fg: #4a3b23;
-  --log-bg: #f0e6cf;
-  --log-fg: #5a6a2a;
-}
-
-/* ---------- Panel ---------- */
+/* elevation + surfaces derived from the tone tokens above, shared everywhere */
 .ytds-panel {
-  margin: 12px 0 16px;
-  padding: 14px 18px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  font-family: "Roboto", Arial, sans-serif;
+  --e1: 0 1px 0 var(--sheen) inset, 0 1px 2px var(--shade);
+  --e2: 0 1px 0 var(--sheen) inset, 0 1px 2px var(--shade), 0 4px 10px -5px var(--shade);
+  --e3: 0 1px 0 var(--sheen) inset, 0 2px 5px -1px var(--shade), 0 12px 26px -12px var(--shade);
+  --e4: 0 1px 0 var(--sheen) inset, 0 6px 14px -4px var(--shade), 0 28px 56px -20px var(--shade);
+  --press: inset 0 2px 4px var(--shade);
+  --ring: 0 0 0 3px var(--accent-wash);
+  --face: linear-gradient(180deg, var(--sheen), rgba(255,255,255,0) 62%);
+  --accent-face: linear-gradient(180deg, var(--accent-2), var(--accent));
 }
 
-.ytds-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  margin-bottom: 10px;
-}
-
-.ytds-btn {
-  cursor: pointer;
-  border: 1px solid var(--btn-border);
-  background: var(--btn-bg);
-  color: var(--btn-fg);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 13px;
-  line-height: 1;
-  transition: background .15s, color .15s, border-color .15s;
-}
-.ytds-btn:hover { background: var(--btn-hover); }
-.ytds-btn.ytds-on {
-  background: var(--btn-on-bg);
-  border-color: var(--btn-on-bg);
-  color: var(--btn-on-fg);
-  font-weight: 600;
-}
-
-.ytds-step {
-  padding: 6px 10px;
-  font-weight: 600;
-  min-width: 34px;
-}
-
-.ytds-select {
-  margin-left: auto;
-  background: var(--sel-bg);
-  color: var(--sel-fg);
-  border: 1px solid var(--btn-border);
-  border-radius: 8px;
-  padding: 6px 8px;
-  font-size: 13px;
-}
-
-/* Rolling transcript: current block bright at the bottom, previous ones dimmed. */
-.ytds-roll {
+/* ---------- Overlay shell ---------- */
+.ytds-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  container-type: size;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 10px;
+  overflow: hidden;
+  background-color: var(--bg);
+  background-image: radial-gradient(120% 90% at 50% 0%, var(--bg-elev), rgba(255,255,255,0) 62%);
+  font-family: var(--sans);
+  color: var(--ink);
+  transition: background-color var(--d5) var(--ease-inout), color var(--d5) var(--ease-inout);
+}
+.ytds-panel, .ytds-panel *, .ytds-panel *::before, .ytds-panel *::after { box-sizing: border-box; }
+/* Reset wrapped in :where() so it keeps the page's button styles out without
+   outweighing our own component rules (a plain `.ytds-panel button` selector
+   is more specific than `.ytds-pill`, and silently ate their font sizes). */
+.ytds-panel :where(button) {
+  font: inherit;
+  margin: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Icons carry no width/height of their own — every size comes from here. */
+.ytds-panel svg {
+  display: block;
+  flex: none;
+  width: calc(1.4 * var(--u));
+  height: calc(1.4 * var(--u));
+}
+
+@keyframes ytds-sub-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes ytds-menu-in { from { opacity: 0; transform: translateY(-5px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes ytds-drawer-in { from { opacity: 0; transform: translateX(28px); } to { opacity: 1; transform: none; } }
+@keyframes ytds-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes ytds-thumb-in { from { opacity: 0; transform: translate(50%,-50%) scale(.3); } to { opacity: 1; transform: translate(50%,-50%) scale(1); } }
+
+/* ---------- Top bar ---------- */
+.ytds-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(2 * var(--u));
+  padding: calc(2.1 * var(--u)) calc(2.4 * var(--u)) 0;
+}
+.ytds-top-side {
+  display: flex;
+  align-items: center;
+  gap: calc(1 * var(--u));
+  flex: 1 1 0;
+}
+.ytds-top-side.ytds-right { justify-content: flex-end; gap: calc(.8 * var(--u)); }
+.ytds-counter {
+  font: 500 calc(1.05 * var(--u)) / 1 var(--sans);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* Segmented tray: a sunken pill holding two or three related controls. */
+.ytds-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(.28 * var(--u));
+  padding: calc(.28 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg-sunken);
+  box-shadow: var(--press);
+}
+.ytds-seg button {
+  height: calc(2.5 * var(--u));
+  padding: 0 calc(1.2 * var(--u));
+  border: none;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 calc(1.05 * var(--u)) / 1 var(--sans);
+  transition: background var(--d3) var(--ease-out), color var(--d2) linear;
+}
+.ytds-seg button:hover { background: var(--bg-hover); color: var(--ink); }
+.ytds-seg button.ytds-on {
+  background-color: var(--accent);
+  background-image: var(--accent-face);
+  color: var(--accent-ink);
+  box-shadow: var(--e1);
+}
+.ytds-seg .ytds-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(2.5 * var(--u));
+  height: calc(2.5 * var(--u));
+  padding: 0;
+  border-radius: 50%;
+}
+.ytds-seg .ytds-step-lg { font-size: calc(1.4 * var(--u)); }
+.ytds-seg .ytds-step-label {
+  min-width: calc(2.2 * var(--u));
+  text-align: center;
+  font: 600 calc(.95 * var(--u)) / 1 var(--mono);
+  color: var(--ink-3);
+}
+
+/* Round icon button (top bar + transport). */
+.ytds-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(3 * var(--u));
+  height: calc(3 * var(--u));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  color: var(--ink-2);
+  box-shadow: var(--e2);
+  transition: transform var(--d2) var(--ease-out), box-shadow var(--d2) var(--ease-out), color var(--d1) linear;
+}
+.ytds-icon:hover { transform: translateY(-1px); box-shadow: var(--e3); color: var(--ink); }
+.ytds-icon:active { transform: translateY(1px) scale(.95); box-shadow: var(--press); }
+.ytds-icon svg { width: 55%; height: 55%; }
+.ytds-icon.ytds-gear svg { width: 60%; height: 60%; }
+.ytds-icon.ytds-gear:hover { transform: translateY(-1px) rotate(35deg); }
+
+/* ---------- Stage: EN above the fixed reading line, translation below ---------- */
+.ytds-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 calc(8 * var(--u));
+}
+.ytds-zone {
+  min-height: 2.56em;
+  display: flex;
+  justify-content: center;
+  text-align: center;
   overflow: hidden;
 }
-.ytds-block {
-  opacity: 0.4;
-  transition: opacity 0.25s ease;
+.ytds-zone-en { align-items: flex-end; }
+.ytds-zone-ua { align-items: flex-start; }
+.ytds-rule {
+  height: 1px;
+  margin: calc(2.2 * var(--u)) 0;
+  background: linear-gradient(90deg, rgba(0,0,0,0), var(--line), rgba(0,0,0,0));
 }
-.ytds-block.ytds-active {
-  opacity: 1;
-}
-
 .ytds-line {
-  text-align: center;
-  line-height: 1.4;
-  min-height: 1.4em;
+  font-family: var(--serif);
+  font-weight: 400;
+  line-height: 1.28;
+  text-wrap: balance;
   word-break: break-word;
+  transition: color var(--d5) var(--ease-inout);
 }
 .ytds-en {
-  color: var(--en);
-  font-size: calc(22px * var(--font-scale, 1));
-  font-weight: 500;
-  margin-bottom: 4px;
+  font-size: calc(4.1 * var(--u) * var(--font-scale, 1));
+  letter-spacing: -.018em;
+  color: var(--ink);
 }
 .ytds-ua {
-  color: var(--tr);
-  font-size: calc(19px * var(--font-scale, 1));
+  font-size: calc(3.2 * var(--u) * var(--font-scale, 1));
+  letter-spacing: -.012em;
+  color: var(--accent);
 }
+.ytds-fresh { animation: ytds-sub-in 420ms var(--ease-out) both; }
+.ytds-zone-ua .ytds-fresh { animation-delay: 60ms; }
+.ytds-note {
+  font: 400 calc(1.4 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink-3);
+  text-align: center;
+}
+
+/* ---------- Shadowing row: previous · repeat · next ---------- */
+.ytds-study-row {
+  display: flex;
+  justify-content: center;
+  padding: 0 calc(2.4 * var(--u)) calc(1.6 * var(--u));
+}
+.ytds-study-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(.7 * var(--u));
+  padding: calc(.6 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  box-shadow: var(--e2);
+}
+.ytds-sbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(.6 * var(--u));
+  height: calc(3.1 * var(--u));
+  padding: 0 calc(1.4 * var(--u));
+  border: none;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--ink-2);
+  font: 600 calc(1.15 * var(--u)) / 1 var(--sans);
+  transition: background-color var(--d2) var(--ease-out), color var(--d1) linear;
+}
+.ytds-sbtn:hover { background-color: var(--bg-hover); color: var(--ink); }
+.ytds-sbtn:active { background-color: var(--bg-sunken); }
+.ytds-sbtn svg { width: calc(1.5 * var(--u)); height: calc(1.5 * var(--u)); }
+.ytds-sbtn.ytds-prev { padding-left: calc(1.1 * var(--u)); }
+.ytds-sbtn.ytds-next { padding-right: calc(1.1 * var(--u)); }
+
+/* Repeat is the hero of the row: taller, filled when armed. */
+.ytds-sbtn.ytds-primary {
+  height: calc(3.7 * var(--u));
+  padding: 0 calc(1.9 * var(--u));
+  gap: calc(.75 * var(--u));
+  border: 1px solid var(--line);
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  color: var(--ink);
+  font-size: calc(1.25 * var(--u));
+  box-shadow: var(--e2);
+  transition: transform var(--d2) var(--ease-spring), box-shadow var(--d3) var(--ease-out),
+              background-color var(--d3) var(--ease-out), color var(--d2) linear;
+}
+.ytds-sbtn.ytds-primary svg { width: calc(1.6 * var(--u)); height: calc(1.6 * var(--u)); }
+.ytds-sbtn.ytds-primary:hover { transform: translateY(-1px) scale(1.015); background-color: var(--bg-elev); }
+.ytds-sbtn.ytds-primary:active { transform: translateY(1px) scale(.975); }
+.ytds-sbtn.ytds-primary.ytds-on {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: var(--accent-face);
+  color: var(--accent-ink);
+  box-shadow: var(--e2), var(--ring);
+}
+
+/* ---------- Transport row ---------- */
+.ytds-controls {
+  display: flex;
+  align-items: center;
+  gap: calc(1.2 * var(--u));
+  padding: 0 calc(2.4 * var(--u)) calc(2 * var(--u));
+}
+.ytds-icon.ytds-play {
+  width: calc(3.9 * var(--u));
+  height: calc(3.9 * var(--u));
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: var(--accent-face);
+  color: var(--accent-ink);
+  box-shadow: var(--e3);
+  transition: transform var(--d2) var(--ease-spring), box-shadow var(--d2) var(--ease-out);
+}
+.ytds-icon.ytds-play svg { width: 45%; height: 45%; }
+.ytds-icon.ytds-play:hover { transform: translateY(-1px) scale(1.04); box-shadow: var(--e3), var(--ring); color: var(--accent-ink); }
+.ytds-icon.ytds-play:active { transform: translateY(1px) scale(.95); box-shadow: var(--press); }
+
+.ytds-time {
+  font: 500 calc(1.05 * var(--u)) / 1 var(--mono);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: calc(7 * var(--u));
+}
+
+/* Pill with a value + chevron; opens a menu. */
+.ytds-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(.5 * var(--u));
+  height: calc(2.8 * var(--u));
+  padding: 0 calc(.9 * var(--u)) 0 calc(1.1 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  color: var(--ink);
+  font: 600 calc(1.1 * var(--u)) / 1 var(--mono);
+  box-shadow: var(--e2);
+  transition: transform var(--d2) var(--ease-out), box-shadow var(--d2) var(--ease-out);
+}
+.ytds-pill:hover { transform: translateY(-1px); box-shadow: var(--e3); }
+.ytds-pill:active { transform: translateY(1px); box-shadow: var(--press); }
+.ytds-pill svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); opacity: .5; }
+
+.ytds-menu-wrap { position: relative; }
+.ytds-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + .6 * var(--u));
+  left: 0;
+  min-width: calc(9 * var(--u));
+  z-index: 20;
+  padding: calc(.4 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--e3);
+}
+.ytds-menu.ytds-open { display: block; animation: ytds-menu-in 180ms var(--ease-out) both; }
+.ytds-menu.ytds-below { top: calc(100% + .6 * var(--u)); bottom: auto; left: auto; right: 0; }
+.ytds-menu button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(.8 * var(--u));
+  height: calc(2.6 * var(--u));
+  padding: 0 calc(.8 * var(--u));
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: 600 calc(1.1 * var(--u)) / 1 var(--mono);
+  text-align: left;
+  transition: background var(--d1) linear;
+}
+.ytds-menu button:hover { background: var(--bg-hover); }
+.ytds-menu button svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); color: var(--accent); }
+.ytds-menu.ytds-menu-text button { font: 500 calc(1.15 * var(--u)) / 1 var(--sans); }
+
+/* Scrubber: track grows on hover, sentence boundaries are the notches. */
+.ytds-scrub {
+  position: relative;
+  flex: 1 1 auto;
+  padding: calc(1 * var(--u)) 0;
+  cursor: pointer;
+}
+.ytds-track {
+  position: relative;
+  height: calc(.4 * var(--u));
+  border-radius: var(--r-pill);
+  background: var(--bg-sunken);
+  box-shadow: var(--press);
+  transition: height var(--d2) var(--ease-out);
+}
+.ytds-scrub:hover .ytds-track { height: calc(.72 * var(--u)); }
+.ytds-buffer, .ytds-fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  border-radius: var(--r-pill);
+}
+.ytds-buffer { background: var(--line); opacity: .7; }
+.ytds-ticks { position: absolute; inset: 0; pointer-events: none; }
+.ytds-fill { background-image: linear-gradient(90deg, var(--accent-2), var(--accent)); }
+.ytds-thumb {
+  display: none;
+  position: absolute;
+  right: 0; top: 50%;
+  width: calc(1.2 * var(--u));
+  height: calc(1.2 * var(--u));
+  border-radius: 50%;
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  border: calc(.16 * var(--u)) solid var(--accent);
+  box-shadow: var(--e3);
+  transform: translate(50%, -50%);
+}
+.ytds-scrub:hover .ytds-thumb { display: block; animation: ytds-thumb-in 180ms var(--ease-spring) both; }
+.ytds-tick {
+  position: absolute;
+  top: 50%;
+  width: calc(.16 * var(--u));
+  height: calc(.72 * var(--u));
+  border-radius: 1px;
+  background: var(--ink);
+  opacity: .16;
+  transform: translateY(-50%);
+}
+.ytds-bubble {
+  display: none;
+  position: absolute;
+  bottom: calc(100% - .2 * var(--u));
+  transform: translateX(-50%);
+  padding: calc(.35 * var(--u)) calc(.7 * var(--u));
+  border-radius: var(--r-sm);
+  background: var(--ink);
+  color: var(--bg);
+  font: 600 calc(1 * var(--u)) / 1 var(--mono);
+  white-space: nowrap;
+  box-shadow: var(--e3);
+  pointer-events: none;
+}
+.ytds-scrub:hover .ytds-bubble { display: block; }
+
+/* ---------- Settings drawer ---------- */
+.ytds-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: var(--scrim);
+}
+.ytds-drawer {
+  display: none;
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  z-index: 31;
+  width: calc(34 * var(--u));
+  flex-direction: column;
+  border-left: 1px solid var(--line);
+  border-radius: var(--r-xl) 0 0 var(--r-xl);
+  background-color: var(--bg-elev);
+  background-image: linear-gradient(180deg, var(--sheen), rgba(255,255,255,0) 26%);
+  box-shadow: var(--e4);
+  overflow: hidden;
+}
+.ytds-panel.ytds-drawer-open .ytds-scrim { display: block; animation: ytds-fade-in var(--d4) var(--ease-inout) both; }
+.ytds-panel.ytds-drawer-open .ytds-drawer { display: flex; animation: ytds-drawer-in var(--d4) var(--ease-inout) both; }
+
+.ytds-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(2 * var(--u)) calc(2 * var(--u)) calc(1.3 * var(--u));
+  border-bottom: 1px solid var(--line-2);
+  font: 600 calc(1.6 * var(--u)) / 1 var(--sans);
+  letter-spacing: -.01em;
+  color: var(--ink);
+}
+.ytds-drawer-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(2.6 * var(--u));
+  height: calc(2.6 * var(--u));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg);
+  color: var(--ink-2);
+  transition: background var(--d2) var(--ease-out), color var(--d1) linear;
+}
+.ytds-drawer-head button:hover { background: var(--bg-hover); color: var(--ink); }
+.ytds-drawer-head button svg { width: 52%; height: 52%; }
+
+.ytds-drawer-body { flex: 1 1 auto; overflow: auto; padding: 0 calc(2 * var(--u)) calc(2 * var(--u)); }
+.ytds-group-title {
+  margin: calc(1.8 * var(--u)) 0 calc(.5 * var(--u));
+  display: flex;
+  align-items: center;
+  gap: calc(.6 * var(--u));
+  font: 600 calc(.95 * var(--u)) / 1 var(--sans);
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ytds-group-title svg { width: calc(1.2 * var(--u)); height: calc(1.2 * var(--u)); }
+.ytds-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(1 * var(--u));
+  padding: calc(.85 * var(--u)) 0;
+  border-bottom: 1px solid var(--line-2);
+  font: 400 calc(1.25 * var(--u)) / 1.35 var(--sans);
+  color: var(--ink);
+}
+.ytds-row:last-child { border-bottom: none; }
+.ytds-row-hint {
+  margin-top: calc(.25 * var(--u));
+  font: 400 calc(1 * var(--u)) / 1.35 var(--sans);
+  color: var(--ink-3);
+}
+
+/* Toggle: track + spring-loaded knob. */
+.ytds-toggle {
+  position: relative;
+  width: calc(3.9 * var(--u));
+  height: calc(2.3 * var(--u));
+  flex: none;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg-sunken);
+  box-shadow: var(--press);
+  transition: background var(--d3) var(--ease-out), border-color var(--d3) var(--ease-out);
+}
+.ytds-toggle span {
+  position: absolute;
+  top: calc(.17 * var(--u));
+  left: calc(.17 * var(--u));
+  width: calc(1.8 * var(--u));
+  height: calc(1.8 * var(--u));
+  border-radius: 50%;
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  box-shadow: var(--e2);
+  transition: transform var(--d3) var(--ease-spring);
+}
+.ytds-toggle.ytds-on { background: var(--accent); border-color: var(--accent); }
+.ytds-toggle.ytds-on span { transform: translateX(calc(1.6 * var(--u))); }
+
+.ytds-swatches { display: flex; gap: calc(.7 * var(--u)); }
+.ytds-swatch {
+  width: calc(2.2 * var(--u));
+  height: calc(2.2 * var(--u));
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--line);
+  transition: transform var(--d2) var(--ease-spring), box-shadow var(--d2) var(--ease-out);
+}
+.ytds-swatch:hover { transform: scale(1.12); }
+.ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 4px var(--accent); }
+.ytds-swatch-sepia { background: linear-gradient(135deg, #e9dcc2 50%, #8a4b12 50%); }
+.ytds-swatch-dark  { background: linear-gradient(135deg, #171310 50%, #d98f4d 50%); }
+.ytds-swatch-light { background: linear-gradient(135deg, #f8f4ec 50%, #9a5518 50%); }
+
+.ytds-drawer .ytds-pill { height: calc(2.3 * var(--u)); font-size: calc(1.05 * var(--u)); box-shadow: var(--e1); }
+.ytds-drawer .ytds-menu { min-width: calc(11 * var(--u)); }
 
 .ytds-status {
-  margin-top: 8px;
-  text-align: center;
-  color: var(--status);
-  font-size: 12px;
+  margin-top: calc(1 * var(--u));
+  font: 500 calc(.95 * var(--u)) / 1.5 var(--mono);
+  color: var(--ink-3);
+  word-break: break-word;
 }
-
 .ytds-log {
-  margin-top: 10px;
-  max-height: 160px;
+  margin-top: calc(1 * var(--u));
+  max-height: calc(16 * var(--u));
   overflow-y: auto;
-  padding: 8px 10px;
-  background: var(--log-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-family: "Roboto Mono", monospace;
-  font-size: 11px;
-  line-height: 1.5;
+  padding: calc(1 * var(--u));
+  border-radius: var(--r-sm);
+  background: var(--bg);
+  box-shadow: var(--press);
+  font: 500 calc(.95 * var(--u)) / 1.7 var(--mono);
   color: var(--log-fg);
   white-space: pre-wrap;
   word-break: break-word;
 }
+.ytds-text-btn {
+  margin-top: calc(.9 * var(--u));
+  display: inline-flex;
+  align-items: center;
+  gap: calc(.5 * var(--u));
+  height: calc(2.3 * var(--u));
+  padding: 0 calc(1.1 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background-color: var(--bg);
+  color: var(--ink-2);
+  font: 600 calc(1.05 * var(--u)) / 1 var(--sans);
+  transition: background var(--d2) var(--ease-out), color var(--d1) linear;
+}
+.ytds-text-btn:hover { background: var(--bg-hover); color: var(--ink); }
 
-/* Launch button injected into the YouTube player controls */
+.ytds-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(1.4 * var(--u));
+  padding: calc(1.1 * var(--u)) calc(2 * var(--u));
+  border-top: 1px solid var(--line-2);
+  font: 500 calc(1 * var(--u)) / 1 var(--sans);
+  color: var(--ink-3);
+}
+.ytds-keys b { font: inherit; font-family: var(--mono); color: var(--ink-2); }
+
+/* ---------- Launch button in the YouTube player controls ----------
+   Lives outside .ytds-panel, so it has no access to the theme tokens. */
 .ytds-launch {
   display: inline-flex !important;
   align-items: center;
@@ -170,133 +646,14 @@
   height: 100%;
   vertical-align: top;
   opacity: 0.9;
+  transition: opacity 150ms ease;
 }
 .ytds-launch:hover { opacity: 1; }
 .ytds-launch svg { width: 26px; height: 26px; display: block; }
 
-/* ---------- Reader mode: full-screen overlay, subtitles centered ---------- */
-html.ytds-reader .ytds-panel {
-  position: fixed;
-  inset: 0;
-  width: 100vw;
-  height: 100vh;
-  z-index: 2147483646;
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  padding: 16px 6vw 12px;
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-html.ytds-reader .ytds-roll {
-  flex: 1 1 auto;
-  justify-content: stretch;
-  gap: 0;
-  overflow: hidden;
-}
-/* Two equal halves; the boundary between them is the fixed reading line. */
-html.ytds-reader .ytds-zone {
-  flex: 1 1 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  overflow: hidden;
-}
-html.ytds-reader .ytds-zone-en { justify-content: flex-end; padding-bottom: 10px; }
-html.ytds-reader .ytds-zone-ua { justify-content: flex-start; padding-top: 10px; }
-html.ytds-reader .ytds-status { display: none; }
-html.ytds-reader .ytds-en { font-size: calc(34px * var(--font-scale, 1)); }
-html.ytds-reader .ytds-ua { font-size: calc(28px * var(--font-scale, 1)); }
-
-/* Exit button (inside the panel, so it shows even in element fullscreen) */
-.ytds-close { display: none; }
-html.ytds-reader .ytds-close {
-  display: flex;
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  z-index: 5;
-  width: 44px;
-  height: 44px;
-  align-items: center;
-  justify-content: center;
-  font-size: 20px;
-  line-height: 1;
-  color: var(--btn-fg);
-  background: var(--btn-bg);
-  border: 1px solid var(--btn-border);
-  border-radius: 50%;
-  cursor: pointer;
-}
-html.ytds-reader .ytds-close:hover { background: var(--btn-hover); }
-
-/* Playback controls (reader only) */
-.ytds-controls { display: none; }
-html.ytds-reader .ytds-controls {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 4px 4px;
-}
-.ytds-cbtn {
-  cursor: pointer;
-  border: 1px solid var(--btn-border);
-  background: var(--btn-bg);
-  color: var(--btn-fg);
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-size: 15px;
-  line-height: 1;
-}
-.ytds-cbtn:hover { background: var(--btn-hover); }
-.ytds-time {
-  color: var(--status);
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-.ytds-progress {
-  flex: 1 1 auto;
-  height: 8px;
-  background: var(--btn-border);
-  border-radius: 999px;
-  cursor: pointer;
-  overflow: hidden;
-}
-.ytds-progress-fill {
-  height: 100%;
-  width: 0;
-  background: var(--btn-on-bg);
-}
-
-/* Speed selector sits inline with the controls (no auto-margin like the bar). */
-.ytds-controls .ytds-select { margin-left: 0; }
-.ytds-speed { min-width: 56px; }
-
-/* Shadowing row: previous / repeat / next sentence (reader + study mode only) */
-.ytds-study-row { display: none; }
-html.ytds-reader.ytds-study .ytds-study-row {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  padding: 6px 4px 2px;
-}
-.ytds-sbtn {
-  cursor: pointer;
-  border: 1px solid var(--btn-border);
-  background: var(--btn-bg);
-  color: var(--btn-fg);
-  border-radius: 999px;
-  padding: 10px 22px;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1;
-}
-.ytds-sbtn:hover { background: var(--btn-hover); }
-.ytds-sbtn.ytds-primary {
-  background: var(--btn-on-bg);
-  border-color: var(--btn-on-bg);
-  color: var(--btn-on-fg);
+@media (prefers-reduced-motion: reduce) {
+  .ytds-panel, .ytds-panel * {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
 }

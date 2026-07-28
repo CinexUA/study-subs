@@ -1,10 +1,10 @@
 # YT Dual Subs — English + Ukrainian
 
-A Google Chrome extension that pulls YouTube subtitles out **below the video**:
-top row — original (EN), bottom row — translation (UA). The picture is never
-covered, and YouTube's native captions can be hidden. The goal is learning
-English: you see the original and instantly the translation of unfamiliar
-words, without losing the main text off-screen.
+A Google Chrome extension that pulls YouTube subtitles into a **full-screen
+study mode**: top row — original (EN) anchored to a fixed reading line, bottom
+row — translation (UA). The goal is learning English: you see the original and
+instantly the translation, one sentence at a time, plus shadowing controls to
+repeat each sentence out loud.
 
 ## Installing in developer mode (dev / unpacked)
 
@@ -39,25 +39,31 @@ when you want to study — click that button → a **full-screen study mode** op
   fixed screen midline, translation below it. The English line is "anchored"
   to that line and **never jumps** regardless of sentence length.
 - **Word-by-word reveal** of subtitles, like on YouTube (by each word's
-  timecode), without breaking mid-sentence.
-- **Custom playback controls**: ⏪ pause/play ⏩, **speed** (0.5×–2×), time,
-  a clickable progress bar — control the video directly.
-- **Shadowing mode ("Study" button)**: the video plays **one sentence** — from
-  its start to the period — and stops. **← Previous · ↻ Repeat · Next →**
-  buttons let you repeat a sentence in a loop until you've got it, then move
-  on. Exiting study mode → the video plays normally again.
-- **EN / UA toggles**, **translation language picker** (uk, en, pl, de, es, fr, it, ru).
-- **Themes**: Sepia, Dark, Light. **Font size** (A− / A+).
-- Exit — **✕** button or **Esc**.
-- **"Log"** button — a built-in diagnostics log (see below).
+  timecode), one sentence at a time.
+- **Custom playback controls**: ±10 s, pause/play, **speed** (0.5×–2×), time,
+  and a scrubber whose notches are sentence boundaries — clicking it snaps to
+  the start of the sentence under the cursor.
+- **Shadowing row**: **Попереднє · Повторити · Наступне**. "Повторити" is a
+  toggle — while it's on, the current sentence replays in a loop (with a short
+  pause each time, so you can repeat it aloud).
+- **Auto-pause at the end of a sentence** (settings → Відтворення): the video
+  plays one sentence — from its start to the period — and stops. Turn it off
+  and the same overlay just follows free playback.
+- **Settings drawer** (⚙ in the top bar): subtitle rows on/off, translation
+  language (uk, en, pl, de, es, fr, it, ru), size (XS…XL), speed, auto-pause,
+  theme (Sepia / Dark / Light), and the diagnostics log.
+- **Hotkeys**: `R` repeat, `←`/`→` previous / next sentence, `Esc` exit.
+- The design follows the "YT Dual Subs — Design Language v1" bundle in the
+  context repo (`designs/v1.0`): one set of tokens, three themes, all sizes
+  derived from a single container-relative unit.
 
 ### Shadowing
 
 Technique: you repeat one sentence out loud right after the speaker, until it
-sounds natural, then move to the next. Turn on **"Study"** — the video stops at
-the end of the current sentence; hit **↻ Repeat** as many times as needed, then
-**Next →**. Sentences are detected by punctuation (`.`, `!`, `?`, `…`)
-regardless of how the captions are split into lines.
+sounds natural, then move to the next. With auto-pause on, the video stops at
+the end of the current sentence; hit **Повторити** to loop it as long as you
+need, then **Наступне**. Sentences are detected by punctuation
+(`.`, `!`, `?`, `…`) regardless of how the captions are split into lines.
 
 ## How it's built
 
@@ -79,15 +85,16 @@ and reuses it: for the original (EN) and for the translation
 (`&tlang=<language code>`). The URL is cached, so switching language doesn't
 require a new interception.
 
-## Diagnostics (the "Log" button)
+## Diagnostics (settings → Advanced)
 
-Click **"Log"** in the panel — a black log window opens with events. Key lines:
+Open the settings drawer (⚙) and scroll to **Advanced** — the log lives there,
+with a "Скопіювати лог" button. Key lines:
 
 - `tracks from playerResponse: N [...]` — how many subtitle tracks the player
   sees (`0` = the video has no YouTube captions).
 - `intercepted timedtext (…, body=… bytes)` — the player made a captions
   request and whether the body was non-empty.
-- `EN via valid URL: N` / `ready: EN N · UK M` — how many lines loaded.
+- `ready: EN N words · M sentences · UK K words` — what was loaded.
 - `using cached valid URL` — the cache kicked in (e.g. on language switch).
 
 ## Limitations
@@ -104,7 +111,7 @@ Click **"Log"** in the panel — a black log window opens with events. Key lines
 
 - [ ] Click a word → translate that single word (dictionary).
 - [ ] DeepL instead of `tlang` + translation cache.
-- [ ] Hotkeys (repeat / next sentence / pause).
+- [x] Hotkeys (repeat / next sentence).
 - [x] Font size adjustment.
 - [x] Playback speed adjustment.
 - [x] Shadowing mode (sentence by sentence).
