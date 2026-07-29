@@ -64,4 +64,6 @@ or sponsored by YouTube or Google LLC. "YouTube" is a trademark of Google LLC.
 
 ## Contact
 
-Questions about this policy: **https://github.com/CinexUA/study-subs/issues**
+Questions about this policy, or about anything the extension does with your
+data: open an issue at
+**https://github.com/CinexUA/study-subs/issues**
