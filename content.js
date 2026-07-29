@@ -71,6 +71,10 @@
   let state = { ...DEFAULTS };
   let enLines = [];      // free-reading mode: captions grouped into lines
   let uaLines = [];
+  // "We have usable captions for this video." It used to be read off
+  // enLines.length, which tied the caption-loading path to a structure that
+  // only free reading renders — touch that mode and the loader changes meaning.
+  let captionsReady = false;
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
@@ -282,11 +286,16 @@
   // Eviction counts records, not bytes, so a set of unusually large tracks can
   // still meet the 10 MB quota — and then the cache would stay broken forever,
   // because nothing else ever shrinks it. Halve the index and try once more.
+  // Remove first, publish the index second. The other order orphans keys the
+  // moment a remove fails: gone from the index, still on disk, never read and
+  // never evicted again — quota spent on names nobody can see. This way a
+  // failure leaves dead names in the index instead, which costs nothing:
+  // cachedTrack answers null for them and the next write filters them out.
   async function writeCache(key, rec, idx, drop) {
     forget(drop);
     try {
-      await chrome.storage.local.set({ [key]: rec, [CACHE_IDX]: idx });
       if (drop.length) await chrome.storage.local.remove(drop);
+      await chrome.storage.local.set({ [key]: rec, [CACHE_IDX]: idx });
     } catch (e) {
       const half = idx.splice(Math.max(1, idx.length >> 1));
       dbg(`cache write failed, shrinking to ${idx.length} tracks and retrying — ${e.message}`);
@@ -322,8 +331,8 @@
     try {
       const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
       const drop = was.filter(mine);
+      if (drop.length) await chrome.storage.local.remove(drop);   // same order as writeCache
       await chrome.storage.local.set({ [CACHE_IDX]: was.filter((k) => !mine(k)) });
-      if (drop.length) await chrome.storage.local.remove(drop);
     } catch (e) { dbg('cache clear failed: ' + e.message); }
     dbg('captions cache cleared for this video');
   }
@@ -863,6 +872,7 @@
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
     dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
+    captionsReady = true;
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
     if (state.reader && state.study) armStudy();
@@ -896,6 +906,19 @@
     // megabyte again on every load is what spent our quota — so the network is
     // the fallback here, not the first move.
     if (!capTlang && body) enUnits = parseUnits(body);
+    // Then the disk: this is the path a language change takes when only the
+    // translation is missing, and the source is already sitting in the cache.
+    // Before this, the intercepted body was kept in memory for exactly this
+    // moment — half a megabyte held for a case the cache now covers.
+    if (!enUnits.length) {
+      const hit = await cachedTrack('src');
+      if (hit) {
+        enUnits = hit.units;
+        if (!srcLang) srcLang = hit.lang || '';
+        dbg(`source: from cache (${enUnits.length} units, lang=${srcLang || '?'})`);
+      }
+    }
+    // And only then the network.
     if (!enUnits.length) {
       try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
     }
@@ -935,6 +958,7 @@
   async function loadCaptions() {
     loadGen++;
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
+    captionsReady = false;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null; sentenceDone = false;
     // Without this the notches survive into the next video, and two videos of
     // the same length with the same sentence count would never redraw them.
@@ -971,7 +995,7 @@
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     captureTimer = setTimeout(() => {
-      if (!awaitingCapture || enLines.length) return;
+      if (!awaitingCapture || captionsReady) return;
       awaitingCapture = false;
       window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
       if (sawTracks) {
@@ -993,7 +1017,10 @@
     // what makes a later language change cost a single request instead of the
     // whole enable-and-wait dance.
     capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
-    if (enLines.length) return;
+    // Half a megabyte of json3. Once the source track is on disk it is the
+    // cache that serves a later language change, never this string again.
+    if (memCache.has(cacheKey('src'))) capturedBody = null;
+    if (captionsReady) return;
 
     if (!(await buildFromBase(base, body, capTlang))) {
       dbg(`capture had no usable EN (body=${(body || '').length} bytes) — retrying the same URL`);
@@ -1020,7 +1047,7 @@
     if (!capturedBase || captureRetries >= 4) return;
     const attempt = ++captureRetries;
     setTimeout(async () => {
-      if (enLines.length || capturedForVideo !== currentVideoId) return;
+      if (captionsReady || capturedForVideo !== currentVideoId) return;
       dbg(`retry #${attempt} on the captured URL`);
       if (await buildFromBase(capturedBase, null, '')) captureDone();
       else scheduleCaptureRetry();
@@ -1054,7 +1081,7 @@
     guardPause();
     // The precise stop timer does the real work; this is a backup.
     if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop('rAF backup');
-    if (!video || (!sentences.length && !enLines.length)) { showPlaceholder(); return; }
+    if (!video || !captionsReady) { showPlaceholder(); return; }
     const t = video.currentTime;
 
     // Study mode: one sentence at a time, EN and the translation index-aligned,
