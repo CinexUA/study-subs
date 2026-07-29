@@ -65,7 +65,9 @@
     // the click will do — open while the controls are on screen, struck
     // through once they are hidden.
     eye: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/></svg>',
-    eyeOff: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/><path d="M4.6 15.4 15.4 4.6"/></svg>'
+    eyeOff: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/><path d="M4.6 15.4 15.4 4.6"/></svg>',
+    // The place we kept for you: shown on the button that returns to it.
+    bookmark: S + '<path d="M5.6 3.6h8.8v12.8L10 12.9l-4.4 3.5Z"/></svg>'
   };
 
   let state = { ...DEFAULTS };
@@ -107,6 +109,16 @@
   let pauseGuardNoted = false;   // the guard logs once per pause, not per frame
   let hookedVideo = null;    // the <video> we attached play/seek/rate listeners to
 
+  // Where study stopped last time, per video. The playback position YouTube
+  // restores drifts and sometimes falls back to zero, and a sentence is the
+  // unit learning actually stops on.
+  const MARKS_KEY = 'ytdsmarks';
+  const MARKS_KEEP = 200;    // ~50 bytes each: nothing beside the caption cache
+  let marks = {};            // videoId -> { t, at }
+  let offeredFor = null;     // the video whose card we have already shown
+  let markMoved = false;     // study actually stopped on this video this session
+  let elResume = null, elResumeText = null, elResumeAgo = null, elResumeGo = null, elMark = null;
+
   // ---------- state ----------
   // A back-off started on a previous page load still counts.
   chrome.storage.local.get(THROTTLE_KEY, (r) => {
@@ -130,6 +142,19 @@
     applySpeed();
   });
   const saveState = () => chrome.storage.local.set({ ytds: state });
+
+  // Marks live in their own key: `ytds` is rewritten whole on every theme or
+  // speed click, and a map that grows has no business riding along with it —
+  // nor should a sentence stop rewrite the settings.
+  chrome.storage.local.get(MARKS_KEY, (r) => {
+    const got = r[MARKS_KEY];
+    if (!got || typeof got !== 'object') return;
+    for (const [id, m] of Object.entries(got)) {
+      if (m && typeof m.t === 'number') marks[id] = { t: m.t, at: m.at || 0 };
+    }
+    // The captions may already be up by the time this lands.
+    offerResume();
+  });
 
   // ---------- debug log ----------
   function dbg(msg) {
@@ -717,6 +742,7 @@
   }
   function seekBy(d) {
     if (!video || !video.duration) return;
+    hideResume();
     video.currentTime = clamp(video.currentTime + d, 0, video.duration);
   }
 
@@ -735,6 +761,7 @@
   // Seek to just before a sentence's first word and play until its end.
   function playSentence(i) {
     if (!video || !sentences.length) return;
+    hideResume();
     sentIdx = clamp(i, 0, sentences.length - 1);
     const s = sentences[sentIdx];
     stopAt = stopping() ? s.stop : null;
@@ -795,6 +822,9 @@
     }
     stopAt = null;
     lastCtl = '';
+    // Last, well clear of the timing above: this is where learning stopped,
+    // and it is the sentence that just played — the same one ▶ would replay.
+    saveMark();
   }
 
   // The stop belonging to the sentence we are in — or null when the playhead is
@@ -839,13 +869,113 @@
 
   function setStudy(on) {
     state.study = on; saveState();
-    if (on) armStudy();
-    else { stopAt = null; sentenceDone = false; clearTimeout(stopTimer); stopTimer = null; } // free play again
+    if (on) { armStudy(); offerResume(); }
+    else { stopAt = null; sentenceDone = false; clearTimeout(stopTimer); stopTimer = null; hideResume(); } // free play again
     syncUi();
   }
 
   // Repeat is a plain action, not a mode: play this sentence once more.
   function repeatSentence() { playSentence(sentIdx); }
+
+  // ---------- resume mark ----------
+  // What gets stored is the TIME a sentence starts, never its number: the
+  // number only exists inside today's parse, and a track swap (asr → manual,
+  // or Reload captions) would leave "sentence 42" pointing somewhere else.
+  function saveMark() {
+    if (!currentVideoId || !state.study || !sentences.length) return;
+    const s = sentences[sentIdx];
+    if (!s) return;
+    marks[currentVideoId] = { t: s.start, at: Date.now() };
+    markMoved = true;
+    const ids = Object.keys(marks);
+    if (ids.length > MARKS_KEEP) {
+      ids.sort((a, b) => (marks[b].at || 0) - (marks[a].at || 0));
+      for (const id of ids.slice(MARKS_KEEP)) delete marks[id];
+    }
+    chrome.storage.local.set({ [MARKS_KEY]: marks });
+    drawMark(video && video.duration);
+    // No log line here on purpose: one per sentence would drown the log the
+    // real bugs are read from.
+  }
+
+  // Nearest sentence start — not findSentenceAt, which answers a different
+  // question ("which sentence is the playhead inside") and carries SENT_EPS:
+  // a one-syllable sentence whose stop sits at start + 0.02 would resolve to
+  // the NEXT one. This also absorbs boundaries that shifted by a few ms when
+  // the track was parsed again.
+  function markSentence(t) {
+    let best = 0, dist = Infinity;
+    for (let i = 0; i < sentences.length; i++) {
+      const d = Math.abs(sentences[i].start - t);
+      if (d < dist) { dist = d; best = i; }
+    }
+    return best;
+  }
+
+  // Calendar days, not elapsed hours: "yesterday" is what an evening session
+  // followed by a morning one actually means.
+  function fmtAgo(at) {
+    if (!at) return '';
+    if (Date.now() - at < 5 * 60000) return 'just now';
+    const midnight = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+    const days = Math.round((midnight(Date.now()) - midnight(at)) / 86400000);
+    if (days <= 0) return 'earlier today';
+    if (days === 1) return 'yesterday';
+    if (days <= 30) return `${days} days ago`;
+    return 'a while ago';
+  }
+
+  // The mark is its own node, outside the thinning rule that drops notches
+  // closer than 8% apart — the one notch that must never disappear.
+  function drawMark(dur) {
+    if (!elMark) return;
+    const m = currentVideoId ? marks[currentVideoId] : null;
+    const show = !!m && !!dur && isFinite(dur) && sentences.length > 0;
+    elMark.style.display = show ? '' : 'none';
+    if (show) elMark.style.left = clamp((m.t / dur) * 100, 0, 100) + '%';
+  }
+
+  // Called from both finishBuild and enterReader: the captions can land
+  // seconds after the overlay opens, or sit on disk long before it. This runs
+  // at the first moment every condition is true at once, and once per video.
+  function offerResume() {
+    if (!elResume || !video || offeredFor === currentVideoId) return;
+    if (!state.reader || !state.study || !sentences.length) return;
+    const m = currentVideoId ? marks[currentVideoId] : null;
+    if (!m) return;
+    const idx = markSentence(m.t);
+    if (idx >= sentences.length - 1) return;                    // the video was finished
+    if (idx === findSentenceAt(video.currentTime || 0)) return;  // already standing there
+    offeredFor = currentVideoId;
+    elResumeText.textContent = `You left off at sentence ${idx + 1}`;
+    elResumeAgo.textContent = fmtAgo(m.at);
+    elResumeGo.textContent = `Continue from ${idx + 1}`;
+    elResume.dataset.idx = String(idx);
+    elResume.style.display = '';
+    if (panel) panel.classList.add('ytds-asking');
+    dbg(`resume mark: sentence ${idx + 1} (${fmtAgo(m.at)})`);
+  }
+
+  // The card itself is the state, the way the drawer is: applyTheme() rebuilds
+  // the panel's class list from scratch on every syncUi(), so a flag kept
+  // anywhere else would be wiped by the next chip or theme click.
+  const resumeOpen = () => !!elResume && elResume.style.display !== 'none';
+
+  // Any transport move means the same thing as "Stay here": the card never
+  // stands between the user and playback.
+  function hideResume() {
+    if (!resumeOpen()) return;
+    elResume.style.display = 'none';
+    if (panel) panel.classList.remove('ytds-asking');
+  }
+
+  function applyResume() {
+    const idx = Number(elResume && elResume.dataset.idx);
+    hideResume();
+    if (!Number.isFinite(idx)) return;
+    playSentence(idx);
+    dbg(`resumed at sentence ${idx + 1}`);
+  }
 
   // The rate belongs to the player exactly as playback state does: writing it
   // on the element alone held only until the next play, seek, ad or quality
@@ -916,6 +1046,7 @@
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
     if (state.reader && state.study) armStudy();
+    offerResume();  // the first moment sentences exist for this video
     return true;
   }
 
@@ -1294,6 +1425,7 @@
       tick.style.left = p + '%';
       elTicks.appendChild(tick);
     }
+    drawMark(dur);
   }
 
   // ---------- DOM helpers ----------
@@ -1438,8 +1570,26 @@
     elNote.style.display = 'none';
 
     elStage = el('div', 'ytds-stage');
-    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote);
+    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, buildResumeCard());
     return elStage;
+  }
+
+  // The offer to pick learning up where it stopped. It lives on the stage
+  // because that is the one part of the overlay focus mode never hides — and
+  // where the eyes already are.
+  function buildResumeCard() {
+    elResumeText = el('div', 'ytds-resume-title');
+    elResumeAgo = el('div', 'ytds-resume-ago');
+    elResumeGo = el('span');
+    const row = el('div', 'ytds-resume-row');
+    row.append(
+      mkBtn('ytds-sbtn ytds-primary', 'Continue where you left off', applyResume, icon('bookmark'), elResumeGo),
+      mkBtn('ytds-sbtn', 'Leave the player where it is', hideResume, el('span', null, 'Stay here'))
+    );
+    elResume = el('div', 'ytds-resume');
+    elResume.style.display = 'none';
+    elResume.append(elResumeText, elResumeAgo, row);
+    return elResume;
   }
 
   // Shadowing row: previous / repeat / next sentence. Repeat is the hero.
@@ -1499,6 +1649,7 @@
   // here and only the execution goes through the player (see wishPlay).
   function togglePlay() {
     if (!video) return;
+    hideResume();
     if (!state.study || !sentences.length) {   // free reading: plain play/pause
       video.paused ? playVideo() : pauseVideo();
       return;
@@ -1513,8 +1664,11 @@
     elFill = el('div', 'ytds-fill');
     elFill.appendChild(el('span', 'ytds-thumb'));
     elTicks = el('div', 'ytds-ticks');
+    elMark = el('div', 'ytds-mark');
+    elMark.title = 'You left off here';
+    elMark.style.display = 'none';
     const track = el('div', 'ytds-track');
-    track.append(elBuffer, elFill, elTicks);
+    track.append(elBuffer, elFill, elTicks, elMark);
 
     elBubble = el('div', 'ytds-bubble', '0:00');
     elScrub = el('div', 'ytds-scrub');
@@ -1711,6 +1865,7 @@
       + (state.study ? ' ytds-study' : '')
       + (state.focus ? ' ytds-focus' : '')
       + (awake ? ' ytds-awake' : '')
+      + (resumeOpen() ? ' ytds-asking' : '')
       + (drawerIsOpen() ? ' ytds-drawer-open' : '');
   }
 
@@ -1794,11 +1949,17 @@
     wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
+    offerResume();  // captions may have been ready long before the overlay
     startLoop();
   }
 
   function exitReader() {
     if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
+    // Only if study actually stopped somewhere this session. Otherwise opening
+    // the overlay and closing it again would overwrite yesterday's sentence
+    // with whatever position YouTube happened to restore.
+    if (markMoved) saveMark();
+    hideResume();
     state.reader = false; saveState();
     stopLoop();
     stopAt = null; // let the video play normally again outside study mode
@@ -1821,8 +1982,9 @@
     const key = e.key;
     if (key === 'Escape') {
       e.stopPropagation();
-      // Peel the layers one at a time: menu → drawer → reader.
+      // Peel the layers one at a time: menu → resume card → drawer → reader.
       if (panel && panel.querySelector('.ytds-menu.ytds-open')) closeMenus();
+      else if (resumeOpen()) hideResume();
       else if (drawerIsOpen()) closeDrawer();
       else exitReader();
       return;
@@ -1895,6 +2057,9 @@
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {
       currentVideoId = id;
+      offeredFor = null;    // a new video gets its own single offer
+      markMoved = false;
+      hideResume();
       applySpeed(); // playbackRate resets on each new video
       loadCaptions();
     }

@@ -256,6 +256,7 @@
 
 /* ---------- Stage: EN above the fixed reading line, translation below ---------- */
 .ytds-stage {
+  position: relative;   /* the resume card is centred against it */
   flex: 1 1 auto;
   min-height: 0;
   display: flex;
@@ -271,6 +272,7 @@
   gap: calc(.5 * var(--u));
   text-align: center;
   overflow: hidden;
+  transition: opacity var(--d3) var(--ease-out);
 }
 .ytds-zone-en { justify-content: flex-end; }
 .ytds-zone-ua { justify-content: flex-start; }
@@ -308,6 +310,48 @@
   font: 400 calc(1.4 * var(--u)) / 1.4 var(--sans);
   color: var(--ink-3);
   text-align: center;
+}
+
+/* ---------- Resume: the sentence study stopped on last time ---------- */
+/* It sits on the stage because that is the one part of the overlay focus mode
+   never hides — and where the reading eye already is. */
+.ytds-resume {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(.5 * var(--u));
+  padding: calc(2.6 * var(--u)) calc(3.4 * var(--u));
+  border-radius: var(--r-lg);
+  background-color: var(--bg-elev);
+  background-image: var(--face);
+  box-shadow: var(--e3);
+  text-align: center;
+  animation: ytds-resume-in var(--d3) var(--ease-out) both;
+}
+.ytds-resume-title {
+  font: 500 calc(2 * var(--u)) / 1.3 var(--sans);
+  color: var(--ink);
+}
+.ytds-resume-ago {
+  font: 400 calc(1.4 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink-3);
+}
+.ytds-resume-row {
+  display: flex;
+  align-items: center;
+  gap: calc(1.2 * var(--u));
+  margin-top: calc(1.5 * var(--u));
+}
+/* Playback can be paused mid-sentence, so there may be live text behind the
+   card: it stays where it is and steps back. */
+.ytds-panel.ytds-asking .ytds-zone { opacity: .25; }
+@keyframes ytds-resume-in {
+  from { opacity: 0; transform: translate(-50%, calc(-50% + 1.2 * var(--u))); }
+  to   { opacity: 1; transform: translate(-50%, -50%); }
 }
 
 /* ---------- Shadowing row: previous · repeat · next ---------- */
@@ -520,6 +564,22 @@
   background: var(--ink);
   opacity: .16;
   transform: translateY(-50%);
+}
+/* Where study stopped last time: the same vocabulary as a sentence notch, a
+   different weight. It is drawn outside the thinning that drops notches closer
+   than 8% apart — this is the one that must never disappear. Unlike the
+   notches it takes pointer events, for its own tooltip; the click still
+   reaches the scrubber underneath and lands on the same sentence. */
+.ytds-mark {
+  position: absolute;
+  top: 50%;
+  width: calc(.24 * var(--u));
+  height: calc(1.3 * var(--u));
+  margin-left: calc(-.12 * var(--u));
+  border-radius: 1px;
+  background: var(--accent);
+  transform: translateY(-50%);
+  pointer-events: auto;
 }
 .ytds-bubble {
   display: none;
