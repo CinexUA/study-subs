@@ -757,19 +757,53 @@
   opacity: 0.7;
 }
 
-/* ---------- Launch button in the YouTube player controls ----------
-   Lives outside .ytds-panel, so it has no access to the theme tokens. */
+/* ---------- The two ways in ----------
+   Both stand on the YouTube page rather than inside .ytds-panel, so neither
+   can reach the overlay's theme tokens: they follow YouTube's own light and
+   dark instead. */
+
+/* In the player controls. The glyph is drawn in currentColor, and the row it
+   sits in is white. */
 .ytds-launch {
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
   height: 100%;
   vertical-align: top;
+  color: #fff;
   opacity: 0.9;
   transition: opacity 150ms ease;
 }
 .ytds-launch:hover { opacity: 1; }
-.ytds-launch svg { width: 26px; height: 26px; display: block; }
+/* 1.5 on the 20-unit grid lands at ~2px once scaled to 26 — the weight the
+   player's own glyphs are drawn at. The shared 1.7 reads heavier there. */
+.ytds-launch svg { width: 26px; height: 26px; display: block; stroke-width: 1.5; }
+
+/* The pill under the video, measured off the buttons standing next to it:
+   40px tall, 20px radius, Roboto 500/14, 24px icon.
+   Its colour comes from currentColor and not from a --yt-spec-* token: that
+   token set is already gone from the page (renamed to --yt-sys-color-*), and
+   a missing token would have left an invisible button. Inherited text colour
+   flips with YouTube's theme by itself and has nothing to rename. */
+.ytds-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  height: 40px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 20px;
+  font: 500 14px/40px Roboto, Arial, sans-serif;
+  white-space: nowrap;
+  cursor: pointer;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  transition: background 150ms ease;
+}
+.ytds-cta:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
+.ytds-cta:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.ytds-cta svg { width: 24px; height: 24px; display: block; }
 
 @media (prefers-reduced-motion: reduce) {
   .ytds-panel, .ytds-panel * {

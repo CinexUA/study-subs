@@ -21,13 +21,6 @@
   const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
   const LEAD = 0.12;
 
-  // Subtitle-box icon for the player-controls button (white, YouTube style).
-  const LAUNCH_ICON =
-    '<svg viewBox="0 0 36 36" height="100%" width="100%" fill="#fff">' +
-    '<rect x="6" y="10" width="24" height="16" rx="3" fill="none" stroke="#fff" stroke-width="2"/>' +
-    '<rect x="9.5" y="14" width="11" height="2.4"/>' +
-    '<rect x="9.5" y="19" width="17" height="2.4"/></svg>';
-
   // One pencil for the whole set: 20×20 grid, 1.7 stroke, round joins,
   // currentColor. Fill is allowed for transport only. Sizes come from CSS.
   const S = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">';
@@ -2022,16 +2015,43 @@
     if (state.reader && !document.fullscreenElement) exitReader();
   });
 
-  // ---------- player-controls launch button ----------
+  // ---------- the two ways in ----------
+  // They answer different questions. The pill under the video is how someone
+  // finds out this extension exists at all; the player icon is how someone who
+  // already knows starts it without leaving the controls. One glyph for both —
+  // the same open book that marks the Study toggle inside the overlay — so the
+  // three of them read as one thing rather than three.
   function ensureLaunchButton() {
     const rc = document.querySelector('.ytp-right-controls');
     if (!rc || rc.querySelector('.ytds-launch')) return;
     const btn = document.createElement('button');
     btn.className = 'ytp-button ytds-launch';
-    btn.title = 'Study: dual subtitles (English + translation)';
-    btn.innerHTML = LAUNCH_ICON;
+    // Not "subtitles": that is the button next to ours, and the old glyph
+    // claimed to be it too.
+    btn.title = 'Study English — dual subtitles';
+    btn.appendChild(icon('study'));
     btn.addEventListener('click', enterReader);
     rc.insertBefore(btn, rc.firstChild);
+  }
+
+  // The row of Share / Save buttons under the video, in the order we know it.
+  // The first two shapes hold like/dislike and Share; the buttons YouTube folds
+  // into "..." on a narrow window live in a different node, so appending here
+  // cannot push one of them out of sight.
+  const ACTION_ROWS = [
+    'ytd-watch-metadata #top-level-buttons-computed',
+    '#actions #top-level-buttons-computed',
+    'ytd-watch-metadata #actions-inner'
+  ];
+  function ensureActionButton() {
+    let row = null;
+    for (const sel of ACTION_ROWS) { row = document.querySelector(sel); if (row) break; }
+    // YouTube's markup is not a contract. When none of the shapes we know is
+    // on the page, the cost is one missing convenience: the player button and
+    // everything behind it stay exactly as they were.
+    if (!row || row.querySelector('.ytds-cta')) return;
+    row.appendChild(mkBtn('ytds-cta', 'Study English — dual subtitles', enterReader,
+      icon('study'), txt('Study English')));
   }
 
   // ---------- lifecycle ----------
@@ -2054,6 +2074,7 @@
     }
     ensurePanel();
     ensureLaunchButton();
+    ensureActionButton();
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {
       currentVideoId = id;
