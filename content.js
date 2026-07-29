@@ -488,9 +488,7 @@
   // Free-reading mode groups words into readable lines: a line closes on a
   // sentence end once it is long enough, or when it gets too long / too slow.
   // `end` is the line's time WINDOW end — where its speech stops, not where the
-  // last word starts. alignLinesTo leans on it the way alignUaToEn leans on a
-  // sentence's `end`; with the last word's onset there instead, every
-  // translation word timed after it was pushed into the next line.
+  // last word starts.
   function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
     const lines = [];
     let cur = null;
@@ -534,13 +532,14 @@
     return { idx, n: Math.max(1, n) };
   }
 
-  // Same reveal, but for a track whose line index is given rather than searched
-  // for — the translation follows the EN line it was aligned to.
-  function pickAligned(lines, idx, t) {
+  // Same reveal, but for the translation of a line whose index is already known.
+  // How far in it is comes from the SOURCE line's progress, not from the
+  // translation's own timestamps: those are the unreliable half of an
+  // auto-translated track (see alignSentences), and study mode has read the
+  // reveal off the source side since it was written.
+  function revealAligned(lines, idx, frac) {
     if (idx < 0 || idx >= lines.length) return { idx: -1, n: 0 };
-    let n = 0;
-    for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
-    return { idx, n: Math.max(1, n) };
+    return { idx, n: Math.max(1, Math.ceil(frac * lines[idx].units.length)) };
   }
 
   // How long a caption unit plausibly sounds, guessed from its own text: json3
@@ -560,9 +559,9 @@
   // Split word units into sentences (period/!/?/… ends one; a long silence
   // also breaks — ASR tracks may lack punctuation entirely). Each sentence
   // keeps its units (word-by-word reveal) plus two times:
-  //   `end`  — the sentence's time WINDOW, used by the text side (translation
-  //            alignment, reveal progress, pre-roll). Never move it: alignUaToEn
-  //            leans on it to decide which words belong to the next sentence.
+  //   `end`  — the sentence's time WINDOW, used by the text side (reveal
+  //            progress, pre-roll, and as the weak time anchor in
+  //            alignSentences).
   //   `stop` — where playback pauses in study mode, trimmed so a guard of
   //            silence always sits between it and the next word's onset.
   // The two used to be one value, and that is exactly why the next sentence's
@@ -641,60 +640,244 @@
     return out;
   }
 
-  // Align the translation to the EN sentences by TIME, not by its own
-  // punctuation. Auto-translate re-places periods (one EN sentence can become
-  // two UA ones, or vice-versa), so segmenting UA independently drifts out of
-  // index-sync with EN. Instead: every UA word keeps its own timestamp from the
-  // same audio, so we bucket each UA word into the EN sentence whose time window
-  // it falls in. Result always has exactly one UA bucket per EN sentence.
-  function alignUaToEn(uaUnits, enSents) {
-    const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
-    if (!out.length) return out;
-    let si = 0;
-    for (const u of uaUnits) {
-      while (si + 1 < enSents.length && enSents[si + 1].start <= u.t + 0.01) si++;
-      out[si].units.push(u);
+  // Letters and digits only: how much text a unit really carries, with
+  // punctuation and spacing left out of the count.
+  function textLen(s) { return String(s == null ? '' : s).replace(UNIT_LETTERS_RE, '').length; }
+
+  // Sentence boundaries of a track read from its own punctuation (a long
+  // silence breaks one too — ASR tracks may carry no punctuation at all).
+  // Lighter than buildSentences on purpose: a translation is never what
+  // playback pauses on, so it needs no stop point and no guard of silence.
+  function splitIntoSentences(units) {
+    const out = [];
+    let cur = null, buf = '';
+    // Where a word's speech actually stops. json3 hands the NEXT word's onset
+    // out as this word's `end` whenever speech is continuous, so taking `end`
+    // at face value leaves every gap measuring zero — and with the gaps gone a
+    // track without punctuation became one single sentence, which handed the
+    // whole translation to the first line and nothing to the rest. The unit's
+    // own text is the better witness in that case, exactly as buildSentences
+    // decides it.
+    const spokenEnd = (u, nextT) => {
+      const est = u.t + estSpeechDur(u.text);
+      const ridesNext = u.end == null || (nextT != null && u.end >= nextT - 0.05);
+      if (!ridesNext) return u.end;
+      return nextT != null ? Math.min(est, nextT) : est;
+    };
+    const close = (i) => {
+      const u = units[i], next = units[i + 1];
+      cur.end = Math.max(cur.start, spokenEnd(u, next ? next.t : null));
+      cur.full = joinUnits(cur.units);
+      out.push(cur);
+      cur = null;
+    };
+    // Silence breaks a sentence only on a track that has no punctuation to go
+    // by. On a punctuated translation the timestamps are the noisy part, so a
+    // gap rule there does nothing but invent sentence boundaries mid-sentence —
+    // and a translation cut into more fragments than the source has sentences
+    // is exactly what the aligner cannot put back together.
+    let marks = 0;
+    for (const u of units) if (endsSentence(u.text)) marks++;
+    const byGaps = marks < units.length / 50;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i], next = units[i + 1];
+      if (!cur) { cur = { start: u.t, units: [] }; buf = ''; }
+      cur.units.push(u);
+      buf += u.text;
+      const longGap = byGaps && next && (next.t - spokenEnd(u, next.t)) >= 1.4;
+      if (endsSentence(buf) || longGap) close(i);
     }
-    // Time buckets can catch the next sentence's leading word(s): an auto-
-    // translated word may be timed a hair before the next EN sentence starts.
-    // Punctuation is the true end, so move anything trailing after a bucket's
-    // last sentence-ending mark into the next bucket — where it belongs.
-    for (let i = 0; i < out.length - 1; i++) {
-      const u = out[i].units;
-      // …but only when the EN target itself ends on punctuation. Free-reading
-      // lines break mid-sentence (too long, too slow), and there a trailing
-      // period inside the bucket is the middle of the line, not its end:
-      // cutting on it would hand the next line words this one is showing.
-      const enFull = enSents[i].full != null ? enSents[i].full : joinUnits(enSents[i].units);
-      let cut = -1;
-      if (endsSentence(enFull)) {
-        for (let k = 0; k < u.length; k++) {
-          if (endsSentence(u[k].text)) cut = k;
+    if (cur) close(units.length - 1);
+    return out;
+  }
+
+  // The share of a bucket that a target covers, cut on whole words: a unit goes
+  // where its own middle falls. Shares that tile [0,1) therefore partition the
+  // units — none lost, none shown twice.
+  function sliceByChars(units, a, b) {
+    const w = units.map((u) => Math.max(1, textLen(u.text)));
+    let total = 0;
+    for (const x of w) total += x;
+    if (!total) return [];
+    const out = [];
+    let acc = 0;
+    for (let i = 0; i < units.length; i++) {
+      const mid = (acc + w[i] / 2) / total;
+      if (mid >= a && mid < b) out.push(units[i]);
+      acc += w[i];
+    }
+    return out;
+  }
+
+  // Fitting a translation to its source is sentence alignment, and only two
+  // signals survive the trip: sentences keep their ORDER, and a translated
+  // sentence keeps roughly the LENGTH of its original. A word's timestamp is
+  // not one of them. An auto-translated track carries the source track's word
+  // slots filled with words in a different order, so a translated word's onset
+  // can sit a second either side of the sentence it belongs to — the further
+  // the two languages move the words, the further the onset drifts.
+  //
+  // Bucketing words by that onset is what used to happen here, with the damage
+  // repaired afterwards: whatever trailed a bucket's LAST period moved into the
+  // next bucket. One bucket, one repair — so when the drift was wide enough for
+  // a bucket to swallow a whole translated sentence, only the fragment behind
+  // its final period moved on, and the screen showed the head of a sentence
+  // over one English line and its tail over the next ("Я вже" under "It hit me
+  // hard.", the rest of it under the sentence after). No local repair can tell
+  // those cases apart: whether a bucket holds two sentences because the
+  // translator split one in two, or because it stole its neighbour's, is only
+  // visible in how the two streams line up as a whole.
+  //
+  // So both sides are cut into sentences, and we take the cheapest monotone
+  // pairing of the two streams: length agreement (Gale–Church) as the signal,
+  // time as a weak anchor, 1:1 preferred and a split or a merge available where
+  // auto-translate really did re-place a period.
+  // Weights, chosen on a stand that scores a whole video's worth of sentences
+  // against the sentence each translated word really came from. They sit in the
+  // middle of a wide plateau rather than on a spike: TIME_W 0.5–0.8 and SKEW
+  // 1.5–4 all behave, so nothing here is balanced on a knife edge.
+  const AL_TIME_W = 0.8;   // one second of onset mismatch, in units of length cost
+  const AL_TIME_CAP = 12;  // past this the anchor has said all it can say
+  const AL_SKEW = 2.5;     // leaving one-sentence-for-one-sentence needs real evidence
+  const AL_DROP = 8;       // leaving a sentence with no partner: a last resort
+  const AL_BAND = 80;      // how far from proportional the pairing may wander
+  const AL_MOVES = [[1, 1], [1, 2], [2, 1], [1, 3], [3, 1], [1, 0], [0, 1]];
+  function alignSentences(uaSents, enSents) {
+    const n = enSents.length, m = uaSents.length;
+    const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
+    if (!n || !m) return out;
+
+    // Prefix sums of text length, so a block's length is one subtraction.
+    // `full` is what the line builder leaves behind and what splitIntoSentences
+    // sets; buildSentences keeps only units, so join them when it is missing —
+    // reading `full` alone made every English length zero, and with the length
+    // signal dead the aligner was left running on the time anchor by itself.
+    const pre = (arr) => {
+      const p = new Float64Array(arr.length + 1);
+      for (let i = 0; i < arr.length; i++) {
+        const s = arr[i];
+        p[i + 1] = p[i] + textLen(s.full != null ? s.full : joinUnits(s.units));
+      }
+      return p;
+    };
+    const enPre = pre(enSents), uaPre = pre(uaSents);
+    const ratio = (uaPre[m] || 1) / (enPre[n] || 1);
+
+    const cost = (i, p, j, q) => {
+      const ec = enPre[i + p] - enPre[i], uc = uaPre[j + q] - uaPre[j];
+      const want = ratio * ec;
+      // Variance of the length difference grows with the length, hence the
+      // square root; the floor keeps two-word sentences from dominating.
+      const len = Math.abs(uc - want) / Math.sqrt(2 * Math.max(want, 20));
+      // Onsets only — never the ends. The last sentence's `end` is the video's
+      // duration by construction (there is no next word to bound it), so an end
+      // difference there is the length of the outro, not a misalignment, and it
+      // was enough to make the aligner refuse the last sentence altogether.
+      const dt = Math.min(Math.abs(uaSents[j].start - enSents[i].start), AL_TIME_CAP);
+      return len + AL_TIME_W * dt + AL_SKEW * (p + q - 2);
+    };
+
+    // The table is kept to a band around the diagonal both streams have to run
+    // along — they describe the same audio, in the same order, so the pairing
+    // cannot wander AL_BAND sentences away from proportional and still be the
+    // cheapest. A full table would cost 80 MB on a three-hour video; this costs
+    // a fraction of a megabyte on any of them.
+    const lo = new Int32Array(n + 1), hi = new Int32Array(n + 1);
+    for (let i = 0; i <= n; i++) {
+      const c = Math.round((i * m) / n);
+      lo[i] = Math.max(0, c - AL_BAND);
+      hi[i] = Math.min(m, c + AL_BAND);
+    }
+    const W = 2 * AL_BAND + 2;
+    const at = (i, j) => (j < lo[i] || j > hi[i] ? -1 : i * W + (j - lo[i]));
+    const best = new Float64Array((n + 1) * W).fill(Infinity);
+    const from = new Int8Array((n + 1) * W).fill(-1);
+    best[at(0, 0)] = 0;
+    for (let i = 0; i <= n; i++) {
+      for (let j = lo[i]; j <= hi[i]; j++) {
+        const base = best[i * W + (j - lo[i])];
+        if (!isFinite(base)) continue;
+        for (let k = 0; k < AL_MOVES.length; k++) {
+          const p = AL_MOVES[k][0], q = AL_MOVES[k][1];
+          if (i + p > n || j + q > m) continue;
+          const to = at(i + p, j + q);
+          if (to < 0) continue;
+          const c = base + (p && q ? cost(i, p, j, q) : AL_DROP);
+          if (c < best[to]) { best[to] = c; from[to] = k; }
         }
       }
-      if (cut >= 0) {
-        if (cut < u.length - 1) out[i + 1].units.unshift(...u.splice(cut + 1));
+    }
+
+    // Walk the pairing back to read the blocks off, then apply them front to
+    // back: a block may add to the bucket of a sentence an earlier block
+    // already wrote to, and only in reading order does adding mean adding.
+    const blocks = [];
+    for (let i = n, j = m; i > 0 || j > 0;) {
+      const cell = at(i, j);
+      const k = cell < 0 ? -1 : from[cell];
+      if (k < 0) break;   // unreachable: leave the rest empty rather than wrong
+      const p = AL_MOVES[k][0], q = AL_MOVES[k][1];
+      i -= p; j -= q;
+      blocks.push([i, p, j, q]);
+    }
+    blocks.reverse();
+    for (const [i, p, j, q] of blocks) {
+      let units = [];
+      for (let x = j; x < j + q; x++) units = units.concat(uaSents[x].units);
+      if (!p) {
+        // A translated sentence with no sentence of its own to sit under: it
+        // reads as part of the one before it, which is where it goes.
+        const t = out[i > 0 ? i - 1 : 0];
+        t.units = t.units.concat(units);
+      } else if (p === 1) {
+        out[i].units = out[i].units.concat(units);
       } else {
-        // No punctuation to go by (auto-translate dropped the period): fall
-        // back to the EN sentence's time window — words that start after its
-        // speech has ended belong to the next sentence.
-        let k = u.length;
-        while (k > 1 && u[k - 1].t > out[i].end + 0.05) k--;
-        if (k < u.length) out[i + 1].units.unshift(...u.splice(k));
+        // One translated sentence over several English ones: split it by the
+        // share of the English text each of them carries.
+        const ec = enPre[i + p] - enPre[i] || 1;
+        for (let x = 0; x < p; x++) {
+          const a = (enPre[i + x] - enPre[i]) / ec;
+          const b = (enPre[i + x + 1] - enPre[i]) / ec;
+          out[i + x].units = out[i + x].units.concat(sliceByChars(units, a, b));
+        }
       }
     }
     return out;
   }
 
-  // Free reading used to pick its EN line and its translation line separately,
-  // each by its own timestamps — two renderers of the same audio, and nothing
-  // held them together. Line lengths are counted in characters, so a short
-  // sentence merges with its neighbour on one side and not on the other, and
-  // the screen shows two EN sentences over the translation of one. Study mode
-  // has been index-aligned since night 5; free reading now is too — one
-  // translation bucket per EN line, same index, same words.
-  function alignLinesTo(uaUnits, enLines) {
-    const lines = alignUaToEn(uaUnits, enLines);
+  // Free reading shows lines, not sentences, and a line may start mid-sentence
+  // (too long, too slow) or hold two short ones. So the translation is aligned
+  // once, per sentence, and the lines then take their share of it: a line gets
+  // the part of a sentence's translation matching the part of the sentence's own
+  // text it shows. Both partitions are built from the same word array, so the
+  // overlap is counted in words rather than guessed from timestamps.
+  function spreadToLines(uaSents, enSents, enLines) {
+    const lines = enLines.map((l) => ({ start: l.start, end: l.end, units: [] }));
+    let li = 0, lineAt = 0, sentAt = 0;
+    for (let si = 0; si < enSents.length; si++) {
+      const u = enSents[si].units;
+      // Character offset at every word boundary of this sentence, so a line's
+      // slice of it is two lookups.
+      const cum = new Float64Array(u.length + 1);
+      for (let x = 0; x < u.length; x++) cum[x + 1] = cum[x] + Math.max(1, textLen(u[x].text));
+      const total = cum[u.length] || 1;
+      const sa = sentAt, sb = sentAt + u.length;
+      // Rewind is never needed: lines and sentences both run forward.
+      while (li < lines.length && lineAt + enLines[li].units.length <= sa) {
+        lineAt += enLines[li].units.length; li++;
+      }
+      let k = li, at = lineAt;
+      while (k < lines.length && at < sb) {
+        const la = at, lb = at + enLines[k].units.length;
+        const from = Math.max(la, sa), to = Math.min(lb, sb);
+        if (to > from) {
+          const part = sliceByChars(uaSents[si].units, cum[from - sa] / total, cum[to - sa] / total);
+          if (part.length) lines[k].units = lines[k].units.concat(part);
+        }
+        at = lb; k++;
+      }
+      sentAt = sb;
+    }
     for (const l of lines) l.full = joinUnits(l.units);
     return lines;
   }
@@ -1027,14 +1210,21 @@
     const enUnits = splitUnitsByPunct(enRaw);
     const uaUnits = sameLang ? enUnits : splitUnitsByPunct(uaRaw);
 
+    // Sentences first: the translation is aligned to them, and the lines then
+    // take their share of that one alignment.
     enLines = groupUnitsToLines(enUnits);
-    uaLines = sameLang ? enLines : alignLinesTo(uaUnits, enLines);
     sentences = buildSentences(enUnits);
-    uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
+    const uaSents = sameLang ? sentences : splitIntoSentences(uaUnits);
+    uaSentences = sameLang ? sentences : alignSentences(uaSents, sentences);
+    uaLines = sameLang ? enLines : spreadToLines(uaSentences, sentences, enLines);
     sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
-    dbg(`ready: source ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
+    dbg(`ready: source ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words / ${uaSents.length} sentences`);
+    if (!sameLang) {
+      const blank = uaSentences.reduce((k, s) => k + (s.units.length ? 0 : 1), 0);
+      if (blank) dbg(`alignment: ${blank} of ${sentences.length} sentences got no translation`);
+    }
     captionsReady = true;
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
@@ -1278,9 +1468,9 @@
     // current one, which fills in word by word.
     const en = pickLine(enLines, t);
     // The translation is not searched for: it is the bucket that belongs to
-    // this EN line. Only how much of it is already spoken still comes from the
-    // clock.
-    const ua = pickAligned(uaLines, en.idx, t);
+    // this EN line, revealed as far as the EN line itself has got.
+    const enLen = en.idx >= 0 ? enLines[en.idx].units.length : 0;
+    const ua = revealAligned(uaLines, en.idx, enLen ? en.n / enLen : 0);
     const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
     if (sig === lastSig) return;
     const fresh = en.idx !== lastIdx;
