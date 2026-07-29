@@ -1017,9 +1017,13 @@
     // what makes a later language change cost a single request instead of the
     // whole enable-and-wait dance.
     capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
-    // Half a megabyte of json3. Once the source track is on disk it is the
-    // cache that serves a later language change, never this string again.
-    if (memCache.has(cacheKey('src'))) capturedBody = null;
+    // Half a megabyte of json3, dropped once it is genuinely redundant — and
+    // only a SOURCE body ever is, because the source cache is what replaces it.
+    // A TRANSLATED body is not covered by that cache, and it is the one thing
+    // that makes switching to its language free: the player fetches it on its
+    // own whenever the user has auto-translate on, and measured on 2026-07-29
+    // dropping it sent us back to the network for a track already in hand.
+    if (!capTlang && memCache.has(cacheKey('src'))) capturedBody = null;
     if (captionsReady) return;
 
     if (!(await buildFromBase(base, body, capTlang))) {
