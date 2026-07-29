@@ -2026,9 +2026,9 @@
     if (!rc || rc.querySelector('.ytds-launch')) return;
     const btn = document.createElement('button');
     btn.className = 'ytp-button ytds-launch';
-    // Not "subtitles": that is the button next to ours, and the old glyph
-    // claimed to be it too.
-    btn.title = 'Study English — dual subtitles';
+    // "Dual" is doing the work here: plain "subtitles" is the button standing
+    // next to ours, and the glyph we used to draw claimed to be it too.
+    btn.title = 'Dual subtitles — original + translation, for language study';
     btn.appendChild(icon('study'));
     btn.addEventListener('click', enterReader);
     rc.insertBefore(btn, rc.firstChild);
@@ -2050,10 +2050,14 @@
     // on the page, the cost is one missing convenience: the player button and
     // everything behind it stay exactly as they were.
     if (!row || row.querySelector('.ytds-cta')) return;
-    // The label is its own element so a narrow window can drop it and leave a
-    // round icon button, the way the row's own buttons give up their words.
-    row.appendChild(mkBtn('ytds-cta', 'Study English — dual subtitles', enterReader,
-      icon('study'), el('span', 'ytds-cta-label', 'Study English')));
+    // The label says what the button opens rather than which language it is
+    // for: the original track can be any of them, and both modes behind this
+    // button show two languages at once. Why anyone would want that is the
+    // tooltip's job, where there is room to say it.
+    // It is its own element so a narrow window can drop it and leave a round
+    // icon button, the way the row's own buttons give up their words.
+    row.appendChild(mkBtn('ytds-cta', 'Dual subtitles — original + translation, for language study',
+      enterReader, icon('study'), el('span', 'ytds-cta-label', 'Dual subtitles')));
   }
 
   // ---------- lifecycle ----------
