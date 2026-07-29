@@ -3,51 +3,44 @@
 
   python3 tools/make-icons.py
 
-icons/source.png is the artwork: a 2048x2048 rounded square, terracotta face,
-"Eng" over a dimmed second script — the original track above, the translation
-below.
-
-The generator hands the file over as RGB with a transparency *checkerboard baked
-into the pixels*, which would show up as a light halo around the icon on Chrome's
-dark theme. So the alpha channel is rebuilt here from the plate's own geometry:
-the artwork bleeds to all four edges with a corner radius measured at 360px of
-2048 (17.6%, fitted to the arc with 2px rms). INSET trims the outermost pixels,
-where the original antialiasing already mixed terracotta with checkerboard grey.
+icons/source.png is the artwork: a 2048x2048 rounded square (corner radius ~17%
+of the width, transparent outside it), terracotta face, two caption bars — the
+bright one is the original track, the dimmed one below is the translation. Same
+colours as an active button in the overlay.
 
 Writes:
   icons/icon{16,32,48,128}.png   toolbar and extensions page, artwork fills the square
   icons/store-icon-128.png       Chrome Web Store listing: artwork inset to 96x96,
                                  transparent padding around it, as the store asks
+  docs/img/icon.png              the page's logo and favicon, so the site cannot
+                                 drift away from the icon that actually ships
 """
 
 from pathlib import Path
 
-from PIL import Image, ImageDraw
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = ROOT / "icons" / "source.png"
 ICONS = ROOT / "icons"
-
-RADIUS_PCT = 0.176  # corner radius as a fraction of the width
-INSET = 2           # px (at source scale) shaved off the edge to drop the grey fringe
-SS = 4              # supersampling for the mask, so the corners stay smooth
+DOCS_IMG = ROOT / "docs" / "img"
 
 
 def load_artwork() -> Image.Image:
-    im = Image.open(SOURCE).convert("RGB")
-    w, h = im.size
-
-    mask = Image.new("L", (w * SS, h * SS), 0)
-    ImageDraw.Draw(mask).rounded_rectangle(
-        [INSET * SS, INSET * SS, (w - INSET) * SS - 1, (h - INSET) * SS - 1],
-        radius=RADIUS_PCT * w * SS,
-        fill=255,
-    )
-    mask = mask.resize((w, h), Image.LANCZOS)
-
-    out = im.convert("RGBA")
-    out.putalpha(mask)
-    return out
+    im = Image.open(SOURCE)
+    if im.mode != "RGBA":
+        raise SystemExit(
+            f"{SOURCE.name} is {im.mode}, not RGBA. An image generator that bakes a "
+            "transparency checkerboard into the pixels will show a light halo around "
+            "the icon on Chrome's dark theme — export it with a real alpha channel."
+        )
+    lo, _ = im.getchannel("A").getextrema()
+    if lo > 10:
+        raise SystemExit(
+            f"{SOURCE.name} has no transparent pixels: the rounded corners are filled "
+            "in. Export with transparency outside the rounded square."
+        )
+    return im
 
 
 def main() -> None:
@@ -62,6 +55,10 @@ def main() -> None:
     store.paste(art.resize((96, 96), Image.LANCZOS), (16, 16))
     store.save(ICONS / "store-icon-128.png")
     print(f"{'store-icon-128.png':22} 128x128 (artwork 96x96)")
+
+    if DOCS_IMG.is_dir():
+        art.resize((256, 256), Image.LANCZOS).save(DOCS_IMG / "icon.png")
+        print(f"{'docs/img/icon.png':22} 256x256")
 
 
 if __name__ == "__main__":
