@@ -2,6 +2,11 @@
 
 **Last updated:** 29 July 2026
 
+> The canonical version of this policy lives at
+> <https://cinexua.github.io/study-subs/privacy.html> — that is the URL given to the
+> Chrome Web Store. This file is the same text; if the two ever disagree, the page
+> is the one that counts, and this file needs updating.
+
 ## Short version
 
 Study Subs collects nothing. No data is transmitted anywhere, to us or to anyone
