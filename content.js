@@ -1034,7 +1034,7 @@
     sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
-    dbg(`ready: EN ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
+    dbg(`ready: source ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words`);
     captionsReady = true;
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
