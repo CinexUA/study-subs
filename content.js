@@ -469,13 +469,19 @@
 
   // Free-reading mode groups words into readable lines: a line closes on a
   // sentence end once it is long enough, or when it gets too long / too slow.
+  // `end` is the line's time WINDOW end — where its speech stops, not where the
+  // last word starts. alignLinesTo leans on it the way alignUaToEn leans on a
+  // sentence's `end`; with the last word's onset there instead, every
+  // translation word timed after it was pushed into the next line.
   function groupUnitsToLines(units, minChars = 40, maxChars = 75, maxDur = 6) {
     const lines = [];
     let cur = null;
     const flush = () => {
       if (cur && cur.units.length) {
         cur.full = joinUnits(cur.units);
-        cur.end = cur.units[cur.units.length - 1].t;
+        const last = cur.units[cur.units.length - 1];
+        const e = last.end != null ? Math.min(last.end, last.t + 0.7) : last.t + estSpeechDur(last.text);
+        cur.end = Math.max(last.t, e);
         lines.push(cur);
       }
       cur = null;
@@ -487,6 +493,11 @@
       if ((endsSentence(buf) && buf.length >= minChars) || buf.length >= maxChars || (u.t - cur.start) >= maxDur) flush();
     }
     flush();
+    // A line's window may never reach into the next one: json3 hands the next
+    // word's onset out as this word's `end` whenever speech is continuous.
+    for (let i = 0; i + 1 < lines.length; i++) {
+      lines[i].end = Math.min(lines[i].end, lines[i + 1].start - 0.03);
+    }
     return lines;
   }
 
@@ -500,6 +511,15 @@
       else hi = m - 1;
     }
     if (idx < 0) return { idx: -1, n: 0 };
+    let n = 0;
+    for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
+    return { idx, n: Math.max(1, n) };
+  }
+
+  // Same reveal, but for a track whose line index is given rather than searched
+  // for — the translation follows the EN line it was aligned to.
+  function pickAligned(lines, idx, t) {
+    if (idx < 0 || idx >= lines.length) return { idx: -1, n: 0 };
     let n = 0;
     for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
     return { idx, n: Math.max(1, n) };
@@ -623,9 +643,16 @@
     // last sentence-ending mark into the next bucket — where it belongs.
     for (let i = 0; i < out.length - 1; i++) {
       const u = out[i].units;
+      // …but only when the EN target itself ends on punctuation. Free-reading
+      // lines break mid-sentence (too long, too slow), and there a trailing
+      // period inside the bucket is the middle of the line, not its end:
+      // cutting on it would hand the next line words this one is showing.
+      const enFull = enSents[i].full != null ? enSents[i].full : joinUnits(enSents[i].units);
       let cut = -1;
-      for (let k = 0; k < u.length; k++) {
-        if (endsSentence(u[k].text)) cut = k;
+      if (endsSentence(enFull)) {
+        for (let k = 0; k < u.length; k++) {
+          if (endsSentence(u[k].text)) cut = k;
+        }
       }
       if (cut >= 0) {
         if (cut < u.length - 1) out[i + 1].units.unshift(...u.splice(cut + 1));
@@ -639,6 +666,19 @@
       }
     }
     return out;
+  }
+
+  // Free reading used to pick its EN line and its translation line separately,
+  // each by its own timestamps — two renderers of the same audio, and nothing
+  // held them together. Line lengths are counted in characters, so a short
+  // sentence merges with its neighbour on one side and not on the other, and
+  // the screen shows two EN sentences over the translation of one. Study mode
+  // has been index-aligned since night 5; free reading now is too — one
+  // translation bucket per EN line, same index, same words.
+  function alignLinesTo(uaUnits, enLines) {
+    const lines = alignUaToEn(uaUnits, enLines);
+    for (const l of lines) l.full = joinUnits(l.units);
+    return lines;
   }
 
   // The auto-stop leaves the playhead a hair short of the sentence end (the
@@ -865,7 +905,7 @@
     const uaUnits = sameLang ? enUnits : splitUnitsByPunct(uaRaw);
 
     enLines = groupUnitsToLines(enUnits);
-    uaLines = sameLang ? enLines : groupUnitsToLines(uaUnits);
+    uaLines = sameLang ? enLines : alignLinesTo(uaUnits, enLines);
     sentences = buildSentences(enUnits);
     uaSentences = sameLang ? sentences : alignUaToEn(uaUnits, sentences);
     sentIdx = 0; stopAt = null; sentenceDone = false;
@@ -1113,7 +1153,10 @@
     // Free reading: the rolling transcript — previous line dimmed above the
     // current one, which fills in word by word.
     const en = pickLine(enLines, t);
-    const ua = pickLine(uaLines, t);
+    // The translation is not searched for: it is the bucket that belongs to
+    // this EN line. Only how much of it is already spoken still comes from the
+    // clock.
+    const ua = pickAligned(uaLines, en.idx, t);
     const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
     if (sig === lastSig) return;
     const fresh = en.idx !== lastIdx;
