@@ -936,6 +936,9 @@
     loadGen++;
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     sentences = []; uaSentences = []; sentIdx = 0; stopAt = null; sentenceDone = false;
+    // Without this the notches survive into the next video, and two videos of
+    // the same length with the same sentence count would never redraw them.
+    ticksDur = 0; ticksLen = -1;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false;
     captureRetries = 0; sawTracks = false;
@@ -1037,6 +1040,13 @@
   });
 
   // ---------- render loop (only while reading) ----------
+  // It used to run for the life of the tab, re-arming every frame and only then
+  // asking whether the overlay was open — 60 frames a second on the home page,
+  // on search, on every video the user merely scrolled past, forever. It now
+  // starts with the reader and stops with it. The guard inside stays: a frame
+  // can already be queued when exitReader flips the flag.
+  function startLoop() { if (rafId == null) rafId = requestAnimationFrame(loop); }
+  function stopLoop() { if (rafId != null) { cancelAnimationFrame(rafId); rafId = null; } }
   function loop() {
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
@@ -1677,7 +1687,10 @@
   }
 
   function applyLayout() {
-    document.documentElement.style.setProperty('--font-scale', state.fontScale || 1);
+    // On the panel, not on documentElement: the variable is read only by
+    // .ytds-en/.ytds-ua, both of which live inside it, and writing it to the
+    // page left our custom property on YouTube with the overlay long closed.
+    if (panel) panel.style.setProperty('--font-scale', state.fontScale || 1);
   }
 
   // The subtitle scale is a 5-step ladder (XS…XL), not a free slider.
@@ -1707,11 +1720,13 @@
     wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
+    startLoop();
   }
 
   function exitReader() {
     if (!state.reader && !document.documentElement.classList.contains('ytds-reader')) return;
     state.reader = false; saveState();
+    stopLoop();
     stopAt = null; // let the video play normally again outside study mode
     sentenceDone = false;
     clearTimeout(stopTimer); stopTimer = null;
@@ -1788,6 +1803,13 @@
     if (location.pathname !== '/watch') return;
     video = document.querySelector('video.html5-main-video') || document.querySelector('video');
     if (video && video !== hookedVideo) {
+      // YouTube swaps the element (an ad, a quality change, a new video), and
+      // the listeners we left on the old one outlive it for the whole session.
+      if (hookedVideo) {
+        hookedVideo.removeEventListener('play', armStop);
+        hookedVideo.removeEventListener('ratechange', onRateChange);
+        hookedVideo.removeEventListener('seeked', onSeeked);
+      }
       hookedVideo = video;
       video.addEventListener('play', armStop);
       video.addEventListener('ratechange', onRateChange);
@@ -1811,5 +1833,6 @@
   document.addEventListener('yt-navigate-finish', tick);
   setInterval(tick, 1000);
   tick();
-  if (!rafId) loop();
+  // No loop here on purpose: state.reader is forced false at startup, so there
+  // would be nothing for it to draw. enterReader starts it.
 })();
