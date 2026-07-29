@@ -788,10 +788,15 @@
 .ytds-cta {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   flex: 0 0 auto;
   height: 40px;
   padding: 0 16px;
+  /* The row is a plain flex box with no gap: every button of YouTube's own
+     carries its 8px on itself, and a foreign child with none stands glued to
+     its neighbour. */
+  margin-left: 8px;
   border: 0;
   border-radius: 20px;
   font: 500 14px/40px Roboto, Arial, sans-serif;
@@ -803,7 +808,16 @@
 }
 .ytds-cta:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
 .ytds-cta:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.ytds-cta svg { width: 24px; height: 24px; display: block; }
+.ytds-cta svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
+
+/* Below this the watch page has already given the actions their own line and
+   folded its flexible buttons away; a 147px pill would be the widest thing
+   left. It drops the word and becomes a 40px circle — the tooltip still says
+   what it is, and the book is the same glyph it wears everywhere else. */
+@media (max-width: 656px) {
+  .ytds-cta { width: 40px; padding: 0; gap: 0; }
+  .ytds-cta-label { display: none; }
+}
 
 @media (prefers-reduced-motion: reduce) {
   .ytds-panel, .ytds-panel * {

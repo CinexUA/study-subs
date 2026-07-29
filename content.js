@@ -2050,8 +2050,10 @@
     // on the page, the cost is one missing convenience: the player button and
     // everything behind it stay exactly as they were.
     if (!row || row.querySelector('.ytds-cta')) return;
+    // The label is its own element so a narrow window can drop it and leave a
+    // round icon button, the way the row's own buttons give up their words.
     row.appendChild(mkBtn('ytds-cta', 'Study English — dual subtitles', enterReader,
-      icon('study'), txt('Study English')));
+      icon('study'), el('span', 'ytds-cta-label', 'Study English')));
   }
 
   // ---------- lifecycle ----------
