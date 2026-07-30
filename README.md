@@ -8,6 +8,8 @@ word, in time with the speaker.
 Translation goes through YouTube's own auto-translate, into any of uk, en, pl,
 de, es, fr, it, ru.
 
+**→ [Install from the Chrome Web Store](https://chromewebstore.google.com/detail/study-subs-%E2%80%94-dual-subtitl/lodajmmoenlnkiplbeigflgnngojkada)** — free, no account, no sign-up.
+
 > Not affiliated with, endorsed by, or sponsored by YouTube or Google LLC.
 > Privacy policy: [`PRIVACY.md`](PRIVACY.md) — nothing is collected, nothing
 > leaves your computer.
@@ -36,7 +38,18 @@ the captions into lines, so one sentence stays one sentence.
   `R` repeat, `Esc` exit. With Study off, `Space` and `R` go to the player and
   `←`/`→` seek ±5 s.
 
-## Install from source
+## Install
+
+The published build lives in the
+[Chrome Web Store](https://chromewebstore.google.com/detail/study-subs-%E2%80%94-dual-subtitl/lodajmmoenlnkiplbeigflgnngojkada);
+that is the version to use unless you intend to change the code. It asks for
+`storage` and access to `www.youtube.com`, and nothing else.
+
+Open any video on `youtube.com` afterwards — a **📖 Dual subtitles** pill appears
+in the row of actions under the video, and a matching button in the player's
+control bar next to CC. Either one opens the overlay.
+
+### From source
 
 The extension needs no build step — Chrome loads the folder as it is.
 
@@ -44,9 +57,6 @@ The extension needs no build step — Chrome loads the folder as it is.
 2. Open `chrome://extensions`.
 3. Turn on **Developer mode** (top right).
 4. Click **Load unpacked** and pick the folder that contains `manifest.json`.
-5. Open any video on `youtube.com` — a **📖 Dual subtitles** pill appears in the
-   row of actions under the video, and a matching button in the player's control
-   bar next to CC. Either one opens the overlay.
 
 After changing the code: press **↻** on the extension's card in
 `chrome://extensions`, then hard-refresh the YouTube tab with **Ctrl+Shift+R**.
