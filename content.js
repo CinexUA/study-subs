@@ -130,9 +130,11 @@
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
     syncUi();
-    // The saved state lands AFTER the first tick(), so the speed applied there
-    // was still the default: without this the menu showed 0.5× while 1× played.
-    applySpeed();
+    // This used to re-apply the speed here, to undo the default the first
+    // tick() had already put on the player before the saved state arrived.
+    // Now that tick() only touches the rate with the overlay open, there is
+    // nothing to undo — and a page load must not take 2× off a player the
+    // user set to 2× in YouTube's own menu. state.reader is false here always.
   });
   // A content script outlives the extension behind it. Chrome updates or reloads
   // the extension — most reliably a few moments after the browser starts, while
@@ -2296,7 +2298,7 @@
       video.addEventListener('play', armStop);
       video.addEventListener('ratechange', onRateChange);
       video.addEventListener('seeked', onSeeked);
-      applySpeed(); // a fresh element starts at 1×, whatever the menu says
+      if (state.reader) applySpeed(); // a fresh element starts at 1×, whatever our menu says
     }
     ensurePanel();
     ensureLaunchButton();
@@ -2307,7 +2309,12 @@
       offeredFor = null;    // a new video gets its own single offer
       markMoved = false;
       hideResume();
-      applySpeed(); // playbackRate resets on each new video
+      // Only ours to set while the overlay is open. YouTube remembers the speed
+      // you picked in its own menu and carries it from video to video; putting
+      // state.speed back here took that away from anyone who had never opened
+      // the overlay at all — they set 2×, an ad or a quality switch swapped the
+      // element, and the player silently went back to 1×.
+      if (state.reader) applySpeed();
       loadCaptions();
     }
     // The player takes the rate back at moments that do not always announce
