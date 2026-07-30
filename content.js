@@ -23,10 +23,7 @@
   // ESTIMATED to end — see sentenceStop. Typed in, not picked from a ladder:
   // the right value is a property of the speaker, and finding it is a matter
   // of nudging by 50 ms and listening, which named steps cannot express.
-  // TAIL_WAS is the fixed constant this used to be, kept as the number to type
-  // when you want the old behaviour back — with no tests in the repo, that is
-  // the regression check for this formula.
-  const TAIL_MIN = 0, TAIL_MAX = 2000, TAIL_WAS = 120;
+  const TAIL_MIN = 0, TAIL_MAX = 2000;
   // The settings the drawer's Playback group owns, and therefore the settings
   // its Reset returns to DEFAULTS. A future option joins this list and is
   // covered by the button without another line anywhere else.
@@ -656,11 +653,17 @@
     // Trusted: today's value, except a multi-word unit may outlive the
     // single-word cap baked into spokenEnd — a whole line is meant to be long.
     const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
-    // The tail is tunable only on the estimate branch. After a real recorded
-    // end 200 ms is enough by construction — there is nothing left to cut —
-    // so the setting has no business moving it, and night 11's verified
-    // behaviour on word-level tracks stays exactly where it was.
-    const tail = ridesNext ? tailSec() : 0.2;
+    // The tail applies to BOTH branches. It first shipped tunable only on the
+    // estimate branch, on the argument that after a real recorded end 200 ms is
+    // enough by construction. Measurement killed that argument: the sentence
+    // this was built for goes down the trusted branch, and the setting did
+    // nothing to it at any value. On a line-level track `u.end` comes from
+    // splitUnitsByPunct, which interpolates it from character positions — it
+    // stops short of the next onset, so it reads as "recorded", while being a
+    // guess like any other. There is no branch here that deserves a constant.
+    // (What each was: 120 ms on the estimate branch, 200 on the trusted one.
+    // One field cannot say both, and does not need to — this is one idea.)
+    const tail = tailSec();
     // Where we would like to pause: today's boundary, then the guarantee
     // that the floor may no longer overrule.
     const want = Math.min(
@@ -2030,8 +2033,8 @@
       field,
       el('div', 'ytds-setting-note',
         `How long to keep playing after the last word is estimated to end, in milliseconds. `
-        + `Raise it if endings sound cut off. ${DEFAULTS.tailMs} is the default; `
-        + `${TAIL_WAS} is how this behaved before it could be changed.`),
+        + `Raise it if endings sound cut off, lower it if the pause drags. `
+        + `${DEFAULTS.tailMs} is the default.`),
       row
     ];
   }
