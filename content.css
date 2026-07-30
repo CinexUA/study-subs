@@ -670,6 +670,35 @@
   color: var(--ink-3);
 }
 .ytds-group-title svg { width: calc(1.2 * var(--u)); height: calc(1.2 * var(--u)); }
+/* A setting in the drawer: its name, its control, then one line saying what it
+   is for. The note is not decoration — the steps are named Tight…Longest, and
+   without it there is nothing to tell you which way is which. */
+.ytds-setting-label {
+  margin-bottom: calc(.6 * var(--u));
+  font: 600 calc(1.05 * var(--u)) / 1.2 var(--sans);
+  color: var(--ink);
+}
+.ytds-setting-note {
+  margin: calc(.6 * var(--u)) 0 calc(1.1 * var(--u));
+  max-width: calc(30 * var(--u));
+  font: 400 calc(.95 * var(--u)) / 1.45 var(--sans);
+  color: var(--ink-3);
+}
+/* The top bar's segments hold two or three items; a ladder of five needs the
+   drawer's full width and has to wrap before it overflows it. */
+.ytds-seg-wide {
+  display: flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  max-width: 100%;
+}
+/* Nothing to undo: say so instead of accepting a click that does nothing. */
+.ytds-text-btn[disabled] {
+  opacity: .45;
+  cursor: default;
+  box-shadow: none;
+}
+.ytds-text-btn[disabled]:hover { background-color: var(--bg); color: var(--ink-2); }
 /* Theme swatches: their own sunken tray in the top bar, next to the gear. */
 .ytds-swatches {
   display: flex;

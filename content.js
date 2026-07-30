@@ -6,7 +6,7 @@
   'use strict';
 
   const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, tailMs: 300 };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -19,6 +19,15 @@
   const SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5, 2];
   // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
   const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
+  // How long study mode keeps playing past the point where the last word is
+  // ESTIMATED to end — see sentenceStop. Tight is the value this was a fixed
+  // constant at, so picking it must reproduce the old behaviour exactly: with
+  // no tests in the repo, that step is the regression check for this formula.
+  const TAIL_STEPS = [['Tight', 120], ['Short', 200], ['Normal', 300], ['Long', 450], ['Longest', 600]];
+  // The settings the drawer's Playback group owns, and therefore the settings
+  // its Reset returns to DEFAULTS. A future option joins this list and is
+  // covered by the button without another line anywhere else.
+  const PLAYBACK_KEYS = ['tailMs'];
   const LEAD = 0.12;
 
   // One pencil for the whole set: 20×20 grid, 1.7 stroke, round joins,
@@ -82,6 +91,7 @@
   let captureRetries = 0, sawTracks = false;
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
+  let btnTailReset;
   let btnStudy, btnFocus;
   let awakeTimer = null, hintTimer = null, copyTimer = null, reloadTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
@@ -126,6 +136,12 @@
     // with nothing ticked: snap it to the nearest step we now offer.
     if (!SPEEDS.some((v) => Math.abs(v - state.speed) < 0.001)) {
       state.speed = SPEEDS.reduce((a, b) => (Math.abs(b - state.speed) < Math.abs(a - state.speed) ? b : a));
+    }
+    // Same reason for the sentence tail: a value saved off a ladder we later
+    // revised would leave the segmented control with no step lit, which reads
+    // as a broken button rather than as an old setting.
+    if (!TAIL_STEPS.some(([, v]) => v === state.tailMs)) {
+      state.tailMs = TAIL_STEPS.reduce((a, b) => (Math.abs(b[1] - state.tailMs) < Math.abs(a[1] - state.tailMs) ? b : a))[1];
     }
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
@@ -593,7 +609,14 @@
   //            silence always sits between it and the next word's onset.
   // The two used to be one value, and that is exactly why the next sentence's
   // first syllable bled through on every sentence the author did not pause after.
-  const SENT_TAIL = 0.12;   // let the last word ring out when there is room
+  // How long to keep playing past the estimated end of the last word, when
+  // there is room for it. This was a fixed 0.12 until a live run showed why it
+  // cannot be: on a line-level track the parser's end is a DISPLAY window, so
+  // the estimate below is a letter-count guess at the speech, and a speaker
+  // slower than the guess loses the tail of the last word ("freeze" heard as
+  // "free") with seconds of silence still to spare. It is now a setting,
+  // because the right value is a property of the speaker, not of the code.
+  const tailSec = () => (state.tailMs || 300) / 1000;
   const SENT_GUARD = 0.2;   // silence we ask for before the next word's onset
   // …and the silence we never give up, whatever the floor below would rather
   // have. The floor used to sit outside the clamp and quietly overrule the
@@ -602,56 +625,100 @@
   // paused, audible where speech ran on. The price is named: on very tight
   // sentences the last word now loses a few tens of ms.
   const SENT_GUARD_MIN = 0.15;
+
+  // When the last word is spoken to the end: parser-provided end if any,
+  // clamped by the next word's onset and by a max plausible word length.
+  const spokenEnd = (u, nextT) => {
+    let e = u.end != null ? u.end : u.t + 0.45;
+    if (nextT != null && nextT > u.t) e = Math.min(e, nextT);
+    return Math.min(e, u.t + 0.7);
+  };
+
+  // The one home of the pause boundary. It lives out here, above both callers,
+  // because this arithmetic has been rebuilt three times and broken twice: a
+  // second copy inside restop() would drift from this one at the first edit,
+  // and the symptom of that drift is audible, not a crash.
+  //   u     — the sentence's last unit
+  //   next  — the unit that follows it (the next sentence's first), or null
+  //   start — the sentence's own start, so the stop cannot precede it
+  function sentenceStop(u, next, start) {
+    if (!next) return null;   // last sentence: the caller uses the window end
+    const se = spokenEnd(u, next.t);
+    // Trust the parser's end only when it stops SHORT of the next onset —
+    // then it is a real recorded end (the author paused), and the sentence
+    // keeps exactly the ending it has today. When it runs into the next
+    // word, it is that word's onset wearing a disguise, and the unit's own
+    // text is the better witness.
+    const est = u.t + estSpeechDur(u.text);
+    const ridesNext = u.end == null || u.end >= next.t - 0.05;
+    // Trusted: today's value, except a multi-word unit may outlive the
+    // single-word cap baked into spokenEnd — a whole line is meant to be long.
+    const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
+    // The tail is tunable only on the estimate branch. After a real recorded
+    // end 200 ms is enough by construction — there is nothing left to cut —
+    // so the setting has no business moving it, and night 11's verified
+    // behaviour on word-level tracks stays exactly where it was.
+    const tail = ridesNext ? tailSec() : 0.2;
+    // Where we would like to pause: today's boundary, then the guarantee
+    // that the floor may no longer overrule.
+    const want = Math.min(
+      Math.max(
+        Math.min(spoken + tail, next.t - SENT_GUARD),
+        Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
+      ),
+      next.t - SENT_GUARD_MIN               // …which silence now outranks
+    );
+    // And two limits that are structural rather than a matter of taste:
+    // a stop at or past the next onset plays the very word we are avoiding,
+    // and a stop before the sentence began gives uaRevealCount a negative
+    // span and findSentenceAt a sentence it can never be inside.
+    const stop = Math.min(Math.max(want, start + 0.02), next.t - 0.03);
+    // Under ~150 ms between the two onsets both wishes cannot hold at once,
+    // and silence wins: the last word is then cut short of its own onset.
+    // At that distance it is a syllable fragment on an ASR timestamp, but
+    // it is a real cost and the log names it.
+    return { stop, gap: next.t - stop, trimmed: stop < u.t };
+  }
+
+  // Recompute only the pause boundaries, in place. Everything the tail cannot
+  // touch is left alone on purpose: the sentence WINDOW (`end`) does not depend
+  // on it, and neither do the alignment, the lines, or the translation — those
+  // cost a full rebuild and would throw the reader back to the first sentence.
+  // The unit that follows a sentence is the next sentence's first, so the whole
+  // input this needs is already in `sentences`.
+  function restop() {
+    if (!sentences.length) return;
+    for (let i = 0; i < sentences.length; i++) {
+      const s = sentences[i], nextS = sentences[i + 1];
+      const u = s.units[s.units.length - 1];
+      const next = nextS && nextS.units.length ? nextS.units[0] : null;
+      if (!u || !next) { s.stop = s.end; s.gap = null; s.trimmed = false; continue; }
+      const r = sentenceStop(u, next, s.start);
+      if (r) { s.stop = r.stop; s.gap = r.gap; s.trimmed = r.trimmed; }
+    }
+    // Re-arm against the new boundary WITHOUT armStudy(): that would clear
+    // sentenceDone, and the sentence you just heard cut off is exactly the one
+    // you want ▶ to play again after raising the value.
+    if (state.reader && stopping() && video) {
+      sentIdx = findSentenceAt(video.currentTime || 0);
+      stopAt = liveStop(video.currentTime || 0);
+      armStop();
+      lastSig = null;
+    }
+  }
+
   function buildSentences(units) {
     const out = [];
     let cur = null, buf = '';
-    // When the last word is spoken to the end: parser-provided end if any,
-    // clamped by the next word's onset and by a max plausible word length.
-    const spokenEnd = (u, nextT) => {
-      let e = u.end != null ? u.end : u.t + 0.45;
-      if (nextT != null && nextT > u.t) e = Math.min(e, nextT);
-      return Math.min(e, u.t + 0.7);
-    };
     const close = (i) => {
       const u = units[i], next = units[i + 1];
       const se = spokenEnd(u, next ? next.t : null);
       cur.end = next
         ? Math.max(Math.min(se + 0.2, next.t - 0.08), Math.min(u.t + 0.15, next.t - 0.03))
         : (video && video.duration ? video.duration : se + 0.6);
-      if (next) {
-        // Trust the parser's end only when it stops SHORT of the next onset —
-        // then it is a real recorded end (the author paused), and the sentence
-        // keeps exactly the ending it has today. When it runs into the next
-        // word, it is that word's onset wearing a disguise, and the unit's own
-        // text is the better witness.
-        const est = u.t + estSpeechDur(u.text);
-        const ridesNext = u.end == null || u.end >= next.t - 0.05;
-        // Trusted: today's value, except a multi-word unit may outlive the
-        // single-word cap baked into spokenEnd — a whole line is meant to be long.
-        const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
-        // Where we would like to pause: today's boundary, then the guarantee
-        // that the floor may no longer overrule.
-        const want = Math.min(
-          Math.max(
-            Math.min(spoken + (ridesNext ? SENT_TAIL : 0.2), next.t - SENT_GUARD),
-            Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
-          ),
-          next.t - SENT_GUARD_MIN               // …which silence now outranks
-        );
-        // And two limits that are structural rather than a matter of taste:
-        // a stop at or past the next onset plays the very word we are avoiding,
-        // and a stop before the sentence began gives uaRevealCount a negative
-        // span and findSentenceAt a sentence it can never be inside.
-        cur.stop = Math.min(Math.max(want, cur.start + 0.02), next.t - 0.03);
-        cur.gap = next.t - cur.stop;   // silence actually left, for the log
-        // Under ~150 ms between the two onsets both wishes cannot hold at once,
-        // and silence wins: the last word is then cut short of its own onset.
-        // At that distance it is a syllable fragment on an ASR timestamp, but
-        // it is a real cost and the log names it.
-        cur.trimmed = cur.stop < u.t;
-      } else {
-        cur.stop = cur.end;
-      }
+      const r = sentenceStop(u, next, cur.start);
+      if (r) { cur.stop = r.stop; cur.gap = r.gap; cur.trimmed = r.trimmed; }
+      else cur.stop = cur.end;
       out.push(cur);
       cur = null;
     };
@@ -1913,6 +1980,33 @@
   // The log is a stack of divs, and textContent runs them together into one
   // unreadable string — every line needs its own newline. And a copy that says
   // nothing is a copy you cannot trust: the button reports what happened.
+  // The drawer's Playback group. It earns its place there by the rule the
+  // drawer is built on — what you set once and never touch while watching.
+  // The steps carry names rather than milliseconds: the number means nothing
+  // to the ear, and the only way to choose is to hear the difference.
+  function buildPlaybackGroup() {
+    const seg = el('div', 'ytds-seg ytds-seg-wide');
+    for (const [label, ms] of TAIL_STEPS) {
+      const b = mkBtn('', `Keep playing ${ms} ms past the estimated end of the last word`,
+        () => { state.tailMs = ms; saveState(); restop(); syncUi(); }, txt(label));
+      b.dataset.tail = String(ms);
+      seg.appendChild(b);
+    }
+    btnTailReset = mkBtn('ytds-text-btn', 'Return the playback settings to their defaults', () => {
+      for (const k of PLAYBACK_KEYS) state[k] = DEFAULTS[k];
+      saveState(); restop(); syncUi();
+    }, icon('replay'), txt('Reset playback settings'));
+    const row = el('div', 'ytds-btn-row');
+    row.appendChild(btnTailReset);
+    return [
+      el('div', 'ytds-setting-label', 'Sentence tail'),
+      seg,
+      el('div', 'ytds-setting-note',
+        'How long to keep playing after the last word is estimated to end. Raise it if endings sound cut off.'),
+      row
+    ];
+  }
+
   function buildCopyLog() {
     const btn = mkBtn('ytds-text-btn', 'Copy the whole log to the clipboard', async () => {
       const text = [...elLog.children].map((n) => n.textContent).join('\n');
@@ -1987,6 +2081,8 @@
 
     const body = el('div', 'ytds-drawer-body');
     body.append(
+      group('Playback', 'pause'),
+      ...buildPlaybackGroup(),
       group('Advanced', 'console'),
       elStatus,
       elLog,
@@ -2044,6 +2140,10 @@
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
+    panel.querySelectorAll('[data-tail]').forEach((b) => b.classList.toggle('ytds-on', +b.dataset.tail === state.tailMs));
+    // Nothing to undo, nothing to press: the button says so rather than
+    // silently doing nothing, which is how a dead control is usually read.
+    if (btnTailReset) btnTailReset.disabled = !PLAYBACK_KEYS.some((k) => state[k] !== DEFAULTS[k]);
     for (const m of menus) m.sync();
     if (btnFocus) setIcon(btnFocus, state.focus ? 'eyeOff' : 'eye');
     renderKeys();
