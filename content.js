@@ -20,10 +20,13 @@
   // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
   const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
   // How long study mode keeps playing past the point where the last word is
-  // ESTIMATED to end — see sentenceStop. Tight is the value this was a fixed
-  // constant at, so picking it must reproduce the old behaviour exactly: with
-  // no tests in the repo, that step is the regression check for this formula.
-  const TAIL_STEPS = [['Tight', 120], ['Short', 200], ['Normal', 300], ['Long', 450], ['Longest', 600]];
+  // ESTIMATED to end — see sentenceStop. Typed in, not picked from a ladder:
+  // the right value is a property of the speaker, and finding it is a matter
+  // of nudging by 50 ms and listening, which named steps cannot express.
+  // TAIL_WAS is the fixed constant this used to be, kept as the number to type
+  // when you want the old behaviour back — with no tests in the repo, that is
+  // the regression check for this formula.
+  const TAIL_MIN = 0, TAIL_MAX = 2000, TAIL_WAS = 120;
   // The settings the drawer's Playback group owns, and therefore the settings
   // its Reset returns to DEFAULTS. A future option joins this list and is
   // covered by the button without another line anywhere else.
@@ -91,7 +94,7 @@
   let captureRetries = 0, sawTracks = false;
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
-  let btnTailReset;
+  let btnTailReset, inpTail;
   let btnStudy, btnFocus;
   let awakeTimer = null, hintTimer = null, copyTimer = null, reloadTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
@@ -137,12 +140,11 @@
     if (!SPEEDS.some((v) => Math.abs(v - state.speed) < 0.001)) {
       state.speed = SPEEDS.reduce((a, b) => (Math.abs(b - state.speed) < Math.abs(a - state.speed) ? b : a));
     }
-    // Same reason for the sentence tail: a value saved off a ladder we later
-    // revised would leave the segmented control with no step lit, which reads
-    // as a broken button rather than as an old setting.
-    if (!TAIL_STEPS.some(([, v]) => v === state.tailMs)) {
-      state.tailMs = TAIL_STEPS.reduce((a, b) => (Math.abs(b[1] - state.tailMs) < Math.abs(a[1] - state.tailMs) ? b : a))[1];
-    }
+    // The tail is typed in, so the saved value is whatever was typed last —
+    // including on a build whose limits were different. Clamp rather than
+    // snap: any number in range is legitimate here, unlike the speed ladder.
+    const savedTail = Math.round(Number(state.tailMs));
+    state.tailMs = Number.isFinite(savedTail) ? clamp(savedTail, TAIL_MIN, TAIL_MAX) : DEFAULTS.tailMs;
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
     syncUi();
@@ -699,8 +701,15 @@
     // Re-arm against the new boundary WITHOUT armStudy(): that would clear
     // sentenceDone, and the sentence you just heard cut off is exactly the one
     // you want ▶ to play again after raising the value.
+    //
+    // And WITHOUT re-deriving sentIdx, which is the whole reason this comment
+    // is long. findSentenceAt draws its boundary at `stop`, so at an auto-stop
+    // the playhead already belongs to the NEXT sentence by that measure —
+    // re-deriving here walked the reader forward one sentence on every change
+    // of the value, and you had to press Previous to get your sentence back.
+    // Nothing here can move sentIdx anyway: sentences are entered at `start`,
+    // and `start` is not what this function touches.
     if (state.reader && stopping() && video) {
-      sentIdx = findSentenceAt(video.currentTime || 0);
       stopAt = liveStop(video.currentTime || 0);
       armStop();
       lastSig = null;
@@ -1740,6 +1749,15 @@
   }
   function txt(s) { return document.createTextNode(s); }
 
+  // Whether the keys belong to a field rather than to study mode. Checked on
+  // the event target, so it covers anything focusable we may add later without
+  // that thing having to know the hotkeys exist.
+  function isTyping(node) {
+    if (!node || !node.tagName) return false;
+    const tag = node.tagName.toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || node.isContentEditable === true;
+  }
+
   function toggleKey(key) { state[key] = !state[key]; saveState(); syncUi(); }
 
   // A− / step / A+ tray in the top bar.
@@ -1985,13 +2003,22 @@
   // The steps carry names rather than milliseconds: the number means nothing
   // to the ear, and the only way to choose is to hear the difference.
   function buildPlaybackGroup() {
-    const seg = el('div', 'ytds-seg ytds-seg-wide');
-    for (const [label, ms] of TAIL_STEPS) {
-      const b = mkBtn('', `Keep playing ${ms} ms past the estimated end of the last word`,
-        () => { state.tailMs = ms; saveState(); restop(); syncUi(); }, txt(label));
-      b.dataset.tail = String(ms);
-      seg.appendChild(b);
-    }
+    const field = el('div', 'ytds-field');
+    inpTail = document.createElement('input');
+    inpTail.type = 'number';
+    inpTail.className = 'ytds-input';
+    inpTail.min = String(TAIL_MIN);
+    inpTail.max = String(TAIL_MAX);
+    inpTail.step = '10';
+    inpTail.title = `Milliseconds, ${TAIL_MIN}–${TAIL_MAX}. Default ${DEFAULTS.tailMs}.`;
+    // On `change`, not on every keystroke: `input` fires per digit, so typing
+    // 450 would apply 4, then 45 — three rebuilds and two of them nonsense.
+    // Enter commits without leaving the field, because that is what a number
+    // field is expected to do.
+    inpTail.addEventListener('change', commitTail);
+    inpTail.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitTail(); } });
+    field.append(inpTail, el('span', 'ytds-field-unit', 'ms'));
+
     btnTailReset = mkBtn('ytds-text-btn', 'Return the playback settings to their defaults', () => {
       for (const k of PLAYBACK_KEYS) state[k] = DEFAULTS[k];
       saveState(); restop(); syncUi();
@@ -2000,11 +2027,24 @@
     row.appendChild(btnTailReset);
     return [
       el('div', 'ytds-setting-label', 'Sentence tail'),
-      seg,
+      field,
       el('div', 'ytds-setting-note',
-        'How long to keep playing after the last word is estimated to end. Raise it if endings sound cut off.'),
+        `How long to keep playing after the last word is estimated to end, in milliseconds. `
+        + `Raise it if endings sound cut off. ${DEFAULTS.tailMs} is the default; `
+        + `${TAIL_WAS} is how this behaved before it could be changed.`),
       row
     ];
+  }
+
+  // An empty or unparseable field means "leave it alone" rather than zero:
+  // clearing a box to retype is not a request for no tail at all.
+  function commitTail() {
+    const raw = parseInt(inpTail.value, 10);
+    const ms = Number.isFinite(raw) ? clamp(Math.round(raw), TAIL_MIN, TAIL_MAX) : state.tailMs;
+    const changed = ms !== state.tailMs;
+    state.tailMs = ms;
+    if (changed) { saveState(); restop(); }
+    syncUi();   // always: the field must show what was actually accepted
   }
 
   function buildCopyLog() {
@@ -2140,7 +2180,9 @@
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
-    panel.querySelectorAll('[data-tail]').forEach((b) => b.classList.toggle('ytds-on', +b.dataset.tail === state.tailMs));
+    // Never while it is being typed into: rewriting the value under the caret
+    // is how a field fights back at the person filling it in.
+    if (inpTail && document.activeElement !== inpTail) inpTail.value = String(state.tailMs);
     // Nothing to undo, nothing to press: the button says so rather than
     // silently doing nothing, which is how a dead control is usually read.
     if (btnTailReset) btnTailReset.disabled = !PLAYBACK_KEYS.some((k) => state[k] !== DEFAULTS[k]);
@@ -2294,6 +2336,11 @@
   // sees the keys study mode has claimed.
   window.addEventListener('keydown', (e) => {
     if (!state.reader || e.altKey || e.ctrlKey || e.metaKey) return;
+    // A field being typed into owns its keys. Study mode claims Space and the
+    // arrows, which are exactly the keys a number field needs for a caret and
+    // a nudge — without this, typing a value moves you through sentences.
+    // Escape still gets through: it is how you leave the field's layer.
+    if (e.key !== 'Escape' && isTyping(e.target)) return;
     const key = e.key;
     if (key === 'Escape') {
       e.stopPropagation();
@@ -2329,6 +2376,7 @@
   // closes the last door through which one press could reach playback twice.
   window.addEventListener('keyup', (e) => {
     if (!state.reader || !state.study || !sentences.length) return;
+    if (isTyping(e.target)) return;   // the field's space bar, not ours
     if (e.code !== 'Space' || e.altKey || e.ctrlKey || e.metaKey) return;
     e.preventDefault(); e.stopImmediatePropagation();
   }, true);
