@@ -134,7 +134,32 @@
     // was still the default: without this the menu showed 0.5× while 1× played.
     applySpeed();
   });
-  const saveState = () => chrome.storage.local.set({ ytds: state });
+  // A content script outlives the extension behind it. Chrome updates or reloads
+  // the extension — most reliably a few moments after the browser starts, while
+  // session-restored tabs are already alive — and every script already in a page
+  // keeps running with a dead bridge: our own timers and listeners are page code,
+  // so the buttons are there and they click, but the first touch of `chrome.*`
+  // throws "Extension context invalidated". Nothing used to check for that, so
+  // the failure was invisible — and because enterReader saved before it drew,
+  // the overlay did not even open. Reloading the page fixed it, which is exactly
+  // why it read as a fluke rather than a bug.
+  const alive = () => { try { return !!(chrome.runtime && chrome.runtime.id); } catch (_) { return false; } };
+  let toldStale = false;
+  // Say it once, in the overlay, where someone who is not the author can act on
+  // it. Twice is nagging, and the log keeps the full count anyway.
+  function tellStale() {
+    if (toldStale) return;
+    toldStale = true;
+    dbg('extension context is gone — nothing can be saved until the page is reloaded');
+    showHint('Study Subs was updated — reload the page (Ctrl+Shift+R) to save settings again', 6000);
+  }
+  // Every write goes through here: a dead bridge must cost a feature, never the
+  // whole overlay.
+  function put(obj) {
+    if (!alive()) { tellStale(); return false; }
+    try { chrome.storage.local.set(obj); return true; } catch (_) { tellStale(); return false; }
+  }
+  const saveState = () => put({ ytds: state });
 
   // Marks live in their own key: `ytds` is rewritten whole on every theme or
   // speed click, and a map that grows has no business riding along with it —
@@ -1068,7 +1093,7 @@
       ids.sort((a, b) => (marks[b].at || 0) - (marks[a].at || 0));
       for (const id of ids.slice(MARKS_KEEP)) delete marks[id];
     }
-    chrome.storage.local.set({ [MARKS_KEY]: marks });
+    put({ [MARKS_KEY]: marks });
     drawMark(video && video.duration);
     // No log line here on purpose: one per sentence would drown the log the
     // real bugs are read from.
@@ -2123,7 +2148,11 @@
   // ---------- reader (study) mode ----------
   function enterReader() {
     ensurePanel();
-    state.reader = true; saveState();
+    // Draw first, persist last. Remembering that the overlay was open is a
+    // convenience; opening it is the whole feature, and a write that throws
+    // (see `put`) used to take the feature down with it — one dead line above
+    // the appendChild and the click did nothing at all, silently.
+    state.reader = true;
     closeDrawer();
     document.body.appendChild(panel);
     document.documentElement.classList.add('ytds-reader');
@@ -2134,6 +2163,7 @@
     armStudy();
     offerResume();  // captions may have been ready long before the overlay
     startLoop();
+    saveState();    // last: by now nothing it does can keep the overlay shut
   }
 
   function exitReader() {
