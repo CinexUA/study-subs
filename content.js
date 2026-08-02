@@ -627,10 +627,27 @@
 
   // When the last word is spoken to the end: parser-provided end if any,
   // clamped by the next word's onset and by a max plausible word length.
+  //
+  // That last clamp is the one to read twice. 0.7 is a WORD, and it only makes
+  // sense on a word-level track. Every manual track is line-level — one caption
+  // line per unit — and there the unit is a whole clause that sounds for
+  // seconds, so a flat 0.7 declares the line finished before it has been read.
+  // Measured on the manual TED track of f_N3PGvnVKg: a 2.6 s line was taken to
+  // end 1.9 s early, which made the silence before the next line measure 2.0 s
+  // — over the 1.4 s that breaks a sentence — so the sentence was cut at the
+  // LINE boundary rather than at its own end, and study mode stopped in the
+  // middle of "…can go blank | when they hear those dreaded words." 50 of 138
+  // sentences on that track ended mid-phrase like this.
+  //
+  // estSpeechDur already draws exactly this distinction (it caps single words
+  // and lets a multi-word unit be as long as its text), so the cap asks it
+  // instead of hardcoding a second opinion. On that track: 138 sentences → 101,
+  // mid-phrase stops 50 → 13, longest cut of a last word 133 ms → 100 ms; the
+  // word-level ASR track of the same video does not move by a single sentence.
   const spokenEnd = (u, nextT) => {
     let e = u.end != null ? u.end : u.t + 0.45;
     if (nextT != null && nextT > u.t) e = Math.min(e, nextT);
-    return Math.min(e, u.t + 0.7);
+    return Math.min(e, u.t + Math.max(0.7, estSpeechDur(u.text)));
   };
 
   // The one home of the pause boundary. It lives out here, above both callers,

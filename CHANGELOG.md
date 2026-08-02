@@ -11,6 +11,12 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- On videos whose subtitles arrive as whole lines rather than single words —
+  most hand-made tracks, TED talks among them — study mode stopped in the
+  middle of a thought, at the line break instead of the end of the sentence,
+  and clipped the last word before it (*blank* heard as *bla…*). Raising
+  **Sentence tail** did nothing about it, because nothing was wrong with the
+  tail. Sentences now run to their own end.
 - Subtitles sometimes never loaded on the first video opened in a tab: the
   overlay sat on *enabling player captions…* for half a minute and then gave
   up, and switching YouTube's own **CC** off and on by hand was the only way
