@@ -2495,7 +2495,11 @@
   // the same open book that marks the Study toggle inside the overlay — so the
   // three of them read as one thing rather than three.
   function ensureLaunchButton() {
-    const rc = document.querySelector('.ytp-right-controls');
+    // Inside #movie_player, like every other control we press: sidebar and
+    // inline preview players carry the same classes, and the main player is
+    // only first in document order until YouTube decides otherwise.
+    const p = document.getElementById('movie_player');
+    const rc = (p || document).querySelector('.ytp-right-controls');
     if (!rc || rc.querySelector('.ytds-launch')) return;
     const btn = document.createElement('button');
     btn.className = 'ytp-button ytds-launch';
@@ -2522,7 +2526,21 @@
     // YouTube's markup is not a contract. When none of the shapes we know is
     // on the page, the cost is one missing convenience: the player button and
     // everything behind it stay exactly as they were.
-    if (!row || row.querySelector('.ytds-cta')) return;
+    if (!row) return;
+    // The shapes above are not alternatives: `#actions-inner` CONTAINS
+    // `#top-level-buttons-computed` (checked in a live page, 2026-08-02), and
+    // they do not appear at the same moment. A script that starts while the
+    // metadata section is half built — seen on the first video after
+    // installing the extension — finds the outer one, puts the pill there, and
+    // a tick later the inner one exists and wins the loop. Asking
+    // `row.querySelector` then looks inside a row our pill is not in, and a
+    // SECOND pill appears: one in the button row, one stretched across the row
+    // below it. So the question is asked of the page, not of the row — exactly
+    // one pill, in the row we would pick now. It also repairs itself: a pill
+    // left in the outer row moves down as soon as the inner one shows up.
+    const found = document.querySelectorAll('.ytds-cta');
+    if (found.length === 1 && found[0].parentNode === row) return;
+    for (const n of found) n.remove();
     // The label says what the button opens rather than which language it is
     // for: the original track can be any of them, and both modes behind this
     // button show two languages at once. Why anyone would want that is the

@@ -26,6 +26,9 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- **Dual subtitles** could appear twice under the video — once in the row of
+  buttons and once stretched across the row below it. Most likely on the first
+  video you opened after installing the extension.
 - The settings button tipped its icon over on hover. The turn was written for
   a cog; the glyph is a pair of sliders, and sliders do not turn.
 - On videos whose subtitles arrive as whole lines rather than single words —
