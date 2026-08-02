@@ -1471,25 +1471,51 @@
   async function handleCaptured(url, body) {
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
+    const empty = !(body || '').length;
 
-    // Recorded even when we already have captions — from the cache, say. A url
-    // the player fetched on its own carries a valid `pot`, and holding one is
-    // what makes a later language change cost a single request instead of the
-    // whole enable-and-wait dance.
-    capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
-    // Half a megabyte of json3, dropped once it is genuinely redundant — and
-    // only a SOURCE body ever is, because the source cache is what replaces it.
-    // A TRANSLATED body is not covered by that cache, and it is the one thing
-    // that makes switching to its language free: the player fetches it on its
-    // own whenever the user has auto-translate on, and measured on 2026-07-29
-    // dropping it sent us back to the network for a track already in hand.
-    if (!capTlang && memCache.has(cacheKey('src'))) capturedBody = null;
+    // An empty answer is the url talking, not the track: the player built it
+    // before its `pot` was ready, and a url without a valid one answers HTTP
+    // 200 with 0 bytes for as long as it exists (measured on Opera, 2026-08-02
+    // — nine rounds of retries, every one of them 0 bytes). Such a url is not
+    // worth remembering: `capturedBase` is what a later language change reuses
+    // instead of running the whole enable-and-wait dance, and a dead one there
+    // would send that change straight into the same silence.
+    if (!empty) {
+      // Recorded even when we already have captions — from the cache, say.
+      capturedBase = base; capturedBody = body; capturedTlang = capTlang; capturedForVideo = currentVideoId;
+      // Half a megabyte of json3, dropped once it is genuinely redundant — and
+      // only a SOURCE body ever is, because the source cache is what replaces
+      // it. A TRANSLATED body is not covered by that cache, and it is the one
+      // thing that makes switching to its language free: the player fetches it
+      // on its own whenever the user has auto-translate on, and measured on
+      // 2026-07-29 dropping it sent us back to the network for a track already
+      // in hand.
+      if (!capTlang && memCache.has(cacheKey('src'))) capturedBody = null;
+    }
     if (captionsReady) return;
 
-    if (!(await buildFromBase(base, body, capTlang))) {
-      dbg(`capture had no usable EN (body=${(body || '').length} bytes) — retrying the same URL`);
-      scheduleCaptureRetry();
+    // No body AND no token in the url: there is nothing here to fetch with, and
+    // asking anyway spends a request on a quota that answers 429. An empty body
+    // with a token is a different story — the translation can be missing over a
+    // source that is perfectly there — so that one still gets its try.
+    if (empty && !/[?&]pot=/.test(url)) {
+      dbg('captured url has no pot and answered with nothing — waiting for the player to mint a fresh one');
       return;
+    }
+
+    if (!(await buildFromBase(base, body, capTlang))) {
+      dbg(`capture had no usable EN (body=${(body || '').length} bytes)` +
+          (empty ? ' — an empty url never recovers, waiting for a fresh one'
+                 : ' — retrying the same URL'));
+      // Retrying an empty url is what the enable loop's off→on toggle is for;
+      // this retry only ever helps the case where the BODY was the problem.
+      if (!empty) scheduleCaptureRetry();
+      return;
+    }
+    // It worked despite the player's own answer being empty, so the url is
+    // proven after all and worth keeping for the next language change.
+    if (empty) {
+      capturedBase = base; capturedBody = null; capturedTlang = ''; capturedForVideo = currentVideoId;
     }
     captureDone();
   }

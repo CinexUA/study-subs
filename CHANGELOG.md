@@ -7,6 +7,15 @@ in the commit that made it.
 `Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
 A bug introduced and fixed before a release is not listed: nobody ever had it.
 
+## Unreleased
+
+### Fixed
+
+- Subtitles sometimes never loaded on the first video opened in a tab: the
+  overlay sat on *enabling player captions…* for half a minute and then gave
+  up, and switching YouTube's own **CC** off and on by hand was the only way
+  through. The extension now does that off→on itself.
+
 ## 1.1.0 — 2026-08-01
 
 ### Added

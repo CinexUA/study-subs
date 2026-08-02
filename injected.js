@@ -40,60 +40,85 @@
 
   // ---- turn captions on so the player fetches them ----
   let enableToken = 0;
-  const ccBtn = () => document.querySelector('.ytp-subtitles-button');
+  // Looked up INSIDE #movie_player, for the same reason the play button is:
+  // sidebar and inline preview players carry the same class, and a blind
+  // document-wide query can press the wrong one — which looks exactly like a
+  // dead button. Only a page with no #movie_player at all falls back.
+  const ccBtn = () => {
+    const p = document.getElementById('movie_player');
+    return p ? p.querySelector('.ytp-subtitles-button')
+             : document.querySelector('.ytp-subtitles-button');
+  };
   const ccIsOn = (b) => !!b && b.getAttribute('aria-pressed') === 'true';
+
+  // Turn captions off and back on again, the way a user pokes CC twice. Split
+  // out because this is the ONLY move that makes the player build a fresh
+  // timedtext url, and both rungs below have to be able to reach it.
+  function retoggle(api, track) {
+    const btn = ccBtn();
+    if (btn) {
+      btn.click();
+      // Switch it back on unconditionally — we are the ones who turned it off,
+      // so a capture landing inside these 500 ms (which stops the loop) must
+      // not leave the user with captions off.
+      setTimeout(() => {
+        const b = ccBtn();
+        if (b && !ccIsOn(b)) b.click();
+      }, 500);
+      return ' | re-toggled CC off→on';
+    }
+    // No button yet (controls not built, or a layout we do not know): an empty
+    // track object is how the player's own API turns captions off.
+    if (api && track) {
+      api.setOption('captions', 'track', {});
+      setTimeout(() => { try { api.setOption('captions', 'track', track); } catch (_) {} }, 300);
+      return ' | re-toggled CC off→on via the API';
+    }
+    return '';
+  }
 
   function enableCaptions(attempt, token) {
     if (token !== enableToken) return; // superseded or stopped
     let ok = false, info = '';
     try {
       const p = document.getElementById('movie_player');
-      if (p && p.loadModule && p.getOption && p.setOption) {
-        try { p.loadModule('captions'); } catch (_) {}
-        const list = p.getOption('captions', 'tracklist') || [];
-        info = 'tracklist=' + list.length;
-        if (list.length) {
-          const en = list.find((t) => (t.languageCode || '').startsWith('en')) || list[0];
-          p.setOption('captions', 'track', en);
-          ok = true;
-        }
+      const api = (p && p.loadModule && p.getOption && p.setOption) ? p : null;
+      if (api) try { api.loadModule('captions'); } catch (_) {}
+      const list = api ? (api.getOption('captions', 'tracklist') || []) : [];
+      const track = list.length
+        ? (list.find((t) => (t.languageCode || '').startsWith('en')) || list[0])
+        : null;
+      info = api ? 'tracklist=' + list.length : 'player API not ready';
+
+      // Round 0 is the gentle one: select a track (which turns captions on if
+      // they were off) or press CC. It is invisible, and when the player simply
+      // had captions off it is the whole story — a good capture normally lands
+      // within a second and stops us before anything shows on screen.
+      const btn = ccBtn();
+      if (attempt === 0 && track) {
+        api.setOption('captions', 'track', track);
+        info += ' | selected a track'; ok = true;
+      } else if (btn && !ccIsOn(btn)) {
+        btn.click(); info += ' | clicked CC on'; ok = true;
       } else {
-        info = 'player API not ready';
-      }
-      if (!ok) {
-        // Fallback: drive the CC button so the player fetches captions itself.
-        const btn = ccBtn();
-        if (!btn) {
-          info += ' | no CC button';
-        } else if (!ccIsOn(btn)) {
-          btn.click(); info += ' | clicked CC on'; ok = true;
-        } else if (attempt >= 2) {
-          // CC is on, yet we still have nothing: the player already spent its
-          // one request, built it before the captions module had settled, and
-          // got an empty body back — an invalid or missing `pot` answers with
-          // HTTP 200 and 0 bytes (measured). It never asks again on its own,
-          // and refetching that same url stays empty forever. Only a real
-          // off→on toggle makes the player build a fresh url, and once it is
-          // settled that one carries a valid pot and returns the full track.
-          btn.click();
-          // Switch it back on unconditionally — we are the ones who turned it
-          // off, so a capture landing inside these 500 ms (which stops the
-          // loop) must not leave the user with captions off.
-          setTimeout(() => {
-            const b = ccBtn();
-            if (b && !ccIsOn(b)) b.click();
-          }, 500);
-          info += ' | re-toggled CC off→on'; ok = true;
-        } else {
-          info += ' | CC already on';
-        }
+        // Still here on a later round, so round 0 changed nothing we could use.
+        // The player spends ONE request per enable, and when it builds that url
+        // before its `pot` token is ready the answer is HTTP 200 with an empty
+        // body (measured; Opera, 2026-08-02). It never asks again on its own,
+        // that url stays empty forever, and re-selecting the track it already
+        // has looks to the player like no change at all — which is why nine
+        // rounds of setOption once left a user with nothing until they poked CC
+        // by hand. Only a real off→on toggle mints a fresh, pot-carrying url.
+        const did = retoggle(api, track);
+        if (did) { info += did; ok = true; }
+        else info += ' | nothing to toggle';
       }
     } catch (e) { info = 'error: ' + e.message; }
     log(`enable#${attempt}: ${info}${ok ? ' → triggered' : ''}`);
     // Keep nudging until the content script says it got usable captions
-    // (YTDS_STOP_ENABLE invalidates the token). The first two rounds are gentle
-    // — a good capture normally lands within a second and stops us before any
-    // toggling is visible on screen.
+    // (YTDS_STOP_ENABLE invalidates the token). Only round 0 is gentle: a good
+    // capture normally lands within a second and stops us before any toggling
+    // is visible on screen, and if it did not, waiting longer never helps.
     if (attempt < 8) setTimeout(() => enableCaptions(attempt + 1, token), ok ? 2500 : 1200);
   }
 
