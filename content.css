@@ -635,14 +635,6 @@
   letter-spacing: -.01em;
   color: var(--ink);
 }
-/* Rides with the title, in the log's own monospace: this is a diagnostic, not a
-   second heading, so it sits a size down and in the quiet ink. */
-.ytds-drawer-head .ytds-ver {
-  margin-left: calc(.7 * var(--u));
-  font: 500 calc(.95 * var(--u)) / 1 var(--mono);
-  letter-spacing: 0;
-  color: var(--ink-3);
-}
 .ytds-drawer-head button {
   display: inline-flex;
   align-items: center;
@@ -763,6 +755,13 @@
 .ytds-swatch-dark  { background: linear-gradient(135deg, #171310 50%, #d98f4d 50%); }
 .ytds-swatch-light { background: linear-gradient(135deg, #f8f4ec 50%, #9a5518 50%); }
 
+/* Sits in Advanced with the status line and the log, in the same monospace and
+   the same quiet ink: it is read together with them, and copied with them. */
+.ytds-ver {
+  margin-top: calc(.6 * var(--u));
+  font: 600 calc(.95 * var(--u)) / 1.5 var(--mono);
+  color: var(--ink-2);
+}
 .ytds-status {
   margin-top: calc(1 * var(--u));
   font: 500 calc(.95 * var(--u)) / 1.5 var(--mono);

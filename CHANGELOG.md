@@ -11,9 +11,10 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Added
 
-- The version you are running, next to the **Settings** title — and as the
-  first line of the log that **Copy log** puts on your clipboard, so a bug
-  report says which build produced it.
+- The version you are running, in **Settings → Advanced**, named — *Study Subs
+  1.1.0*, not a bare number beside a heading. It is also the first line of what
+  **Copy log** puts on your clipboard, so a bug report says which build
+  produced it.
 
 ### Changed
 

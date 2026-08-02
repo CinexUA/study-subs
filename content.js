@@ -164,11 +164,21 @@
   // the overlay did not even open. Reloading the page fixed it, which is exactly
   // why it read as a fluke rather than a bug.
   const alive = () => { try { return !!(chrome.runtime && chrome.runtime.id); } catch (_) { return false; } };
-  // The one number a bug report needs. It comes from the same dead bridge as
-  // everything else in chrome.*, so an orphaned script simply shows no version
-  // rather than losing the drawer it sits in.
-  const version = () => {
-    try { return alive() ? (chrome.runtime.getManifest().version || '') : ''; } catch (_) { return ''; }
+  // "Study Subs 1.1.0" — with the product's own name, never the number alone.
+  // Next to a heading a bare version reads as the version OF that heading
+  // ("Settings 1.1.0" — the version of the settings?), and the one place it is
+  // ever needed is a bug report, where the name is half the answer.
+  // It comes through the same bridge as everything else in chrome.*, so an
+  // orphaned script shows nothing here rather than losing the drawer it is in.
+  const versionTag = () => {
+    try {
+      if (!alive()) return '';
+      const m = chrome.runtime.getManifest();
+      // The store name carries a tagline after an em dash; the product is the
+      // part in front of it.
+      const name = String(m.name || '').split('—')[0].trim();
+      return [name, m.version].filter(Boolean).join(' ');
+    } catch (_) { return ''; }
   };
   let toldStale = false;
   // Say it once, in the overlay, where someone who is not the author can act on
@@ -2136,8 +2146,8 @@
     const btn = mkBtn('ytds-text-btn', 'Copy the whole log to the clipboard', async () => {
       // A log without a version is a report nobody can place: the first line
       // says which build produced everything under it.
-      const v = version();
-      const text = (v ? `Study Subs ${v}\n` : '') + [...elLog.children].map((n) => n.textContent).join('\n');
+      const tag = versionTag();
+      const text = (tag ? tag + '\n' : '') + [...elLog.children].map((n) => n.textContent).join('\n');
       let ok = false;
       try { await navigator.clipboard.writeText(text); ok = true; } catch (_) { ok = copyFallback(text); }
       clearTimeout(copyTimer);
@@ -2188,13 +2198,8 @@
     const scrim = el('div', 'ytds-scrim');
     scrim.addEventListener('click', closeDrawer);
 
-    // The title carries the version, so the head keeps its two flex children
-    // and the close button stays where it was.
-    const title = el('span', null, 'Settings');
-    const v = version();
-    if (v) title.appendChild(el('span', 'ytds-ver', v));
     const head = el('div', 'ytds-drawer-head');
-    head.append(title, mkBtn('', 'Close', closeDrawer, icon('close')));
+    head.append(el('span', null, 'Settings'), mkBtn('', 'Close', closeDrawer, icon('close')));
 
     const group = (title, iconName) => {
       const g = el('div', 'ytds-group-title');
@@ -2212,11 +2217,16 @@
     const btnRow = el('div', 'ytds-btn-row');
     btnRow.append(buildCopyLog(), buildReloadCaptions());
 
+    // Under Advanced, above the log: the version is read in exactly the moment
+    // the log is, and it is the first line of what Copy log hands over — so
+    // what you see here and what you paste say the same thing.
+    const tag = versionTag();
     const body = el('div', 'ytds-drawer-body');
     body.append(
       group('Playback', 'pause'),
       ...buildPlaybackGroup(),
       group('Advanced', 'console'),
+      ...(tag ? [el('div', 'ytds-ver', tag)] : []),
       elStatus,
       elLog,
       btnRow
