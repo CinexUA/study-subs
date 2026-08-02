@@ -251,8 +251,11 @@
 .ytds-icon:hover { transform: translateY(-1px); box-shadow: var(--e3); color: var(--ink); }
 .ytds-icon:active { transform: translateY(1px) scale(.95); box-shadow: var(--press); }
 .ytds-icon svg { width: 55%; height: 55%; }
-.ytds-icon.ytds-gear svg { width: 60%; height: 60%; }
-.ytds-icon.ytds-gear:hover { transform: translateY(-1px) rotate(35deg); }
+/* The glyph here is a pair of sliders, not a cog. It used to turn 35° on hover
+   — a gesture that reads as "the gear engages" on a cog and as "the faders fell
+   over" on anything else. The class said gear, the icon said sliders, and the
+   animation believed the class. It now lifts like every other icon button. */
+.ytds-icon.ytds-settings svg { width: 60%; height: 60%; }
 
 /* ---------- Stage: EN above the fixed reading line, translation below ---------- */
 .ytds-stage {
@@ -631,6 +634,14 @@
   font: 600 calc(1.6 * var(--u)) / 1 var(--sans);
   letter-spacing: -.01em;
   color: var(--ink);
+}
+/* Rides with the title, in the log's own monospace: this is a diagnostic, not a
+   second heading, so it sits a size down and in the quiet ink. */
+.ytds-drawer-head .ytds-ver {
+  margin-left: calc(.7 * var(--u));
+  font: 500 calc(.95 * var(--u)) / 1 var(--mono);
+  letter-spacing: 0;
+  color: var(--ink-3);
 }
 .ytds-drawer-head button {
   display: inline-flex;

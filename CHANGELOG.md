@@ -9,6 +9,12 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Added
+
+- The version you are running, next to the **Settings** title — and as the
+  first line of the log that **Copy log** puts on your clipboard, so a bug
+  report says which build produced it.
+
 ### Changed
 
 - On videos whose subtitles carry a time for each whole line rather than each
@@ -19,6 +25,8 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- The settings button tipped its icon over on hover. The turn was written for
+  a cog; the glyph is a pair of sliders, and sliders do not turn.
 - On videos whose subtitles arrive as whole lines rather than single words —
   most hand-made tracks, TED talks among them — study mode stopped in the
   middle of a thought, at the line break instead of the end of the sentence,

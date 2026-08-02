@@ -164,6 +164,12 @@
   // the overlay did not even open. Reloading the page fixed it, which is exactly
   // why it read as a fluke rather than a bug.
   const alive = () => { try { return !!(chrome.runtime && chrome.runtime.id); } catch (_) { return false; } };
+  // The one number a bug report needs. It comes from the same dead bridge as
+  // everything else in chrome.*, so an orphaned script simply shows no version
+  // rather than losing the drawer it sits in.
+  const version = () => {
+    try { return alive() ? (chrome.runtime.getManifest().version || '') : ''; } catch (_) { return ''; }
+  };
   let toldStale = false;
   // Say it once, in the overlay, where someone who is not the author can act on
   // it. Twice is nagging, and the log keeps the full count anyway.
@@ -1928,7 +1934,7 @@
     right.append(
       buildSwatches(),
       btnFocus,
-      mkBtn('ytds-icon ytds-gear', 'Settings', openDrawer, icon('settings')),
+      mkBtn('ytds-icon ytds-settings', 'Settings', openDrawer, icon('settings')),
       mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))
     );
 
@@ -2128,7 +2134,10 @@
 
   function buildCopyLog() {
     const btn = mkBtn('ytds-text-btn', 'Copy the whole log to the clipboard', async () => {
-      const text = [...elLog.children].map((n) => n.textContent).join('\n');
+      // A log without a version is a report nobody can place: the first line
+      // says which build produced everything under it.
+      const v = version();
+      const text = (v ? `Study Subs ${v}\n` : '') + [...elLog.children].map((n) => n.textContent).join('\n');
       let ok = false;
       try { await navigator.clipboard.writeText(text); ok = true; } catch (_) { ok = copyFallback(text); }
       clearTimeout(copyTimer);
@@ -2179,8 +2188,13 @@
     const scrim = el('div', 'ytds-scrim');
     scrim.addEventListener('click', closeDrawer);
 
+    // The title carries the version, so the head keeps its two flex children
+    // and the close button stays where it was.
+    const title = el('span', null, 'Settings');
+    const v = version();
+    if (v) title.appendChild(el('span', 'ytds-ver', v));
     const head = el('div', 'ytds-drawer-head');
-    head.append(el('span', null, 'Settings'), mkBtn('', 'Close', closeDrawer, icon('close')));
+    head.append(title, mkBtn('', 'Close', closeDrawer, icon('close')));
 
     const group = (title, iconName) => {
       const g = el('div', 'ytds-group-title');
