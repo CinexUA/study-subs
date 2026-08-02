@@ -103,6 +103,9 @@
   // time at which playback should stop (null = free play).
   let sentences = [];    // EN sentences (drive playback timing + EN reveal)
   let uaSentences = [];  // translation sentences, index-aligned to `sentences`
+  // Does this track carry a time per WORD, or only per caption line? The
+  // word-by-word reveal is only honest on the first kind; see wordLevelTrack().
+  let wordLevel = true;
   let sentIdx = 0;
   let stopAt = null;
   let sentenceDone = false;  // the current sentence played out and we stopped at its end
@@ -569,6 +572,7 @@
       else hi = m - 1;
     }
     if (idx < 0) return { idx: -1, n: 0 };
+    if (!wordLevel) return { idx, n: lines[idx].units.length };  // same rule as revealCount
     let n = 0;
     for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
     return { idx, n: Math.max(1, n) };
@@ -1328,10 +1332,23 @@
   // born; two would be the very flaw the bugs of nights 5–8 grew out of.
   // Units arrive as the parser gave them (pre-split): the split is cheap to
   // redo and is not what belongs on disk.
+  // A track either times every word or only whole caption lines, and nothing in
+  // the response says which — the shape of the units is the only witness. ASR
+  // tracks hand out one word per segment, hand-made ones one line (measured on
+  // f_N3PGvnVKg: the ASR track is 100% single-word units, the manual one 0.7%).
+  // The two are that far apart, so the threshold does not have to be clever.
+  function wordLevelTrack(units) {
+    if (units.length < 8) return true;   // too little to judge: keep the reveal
+    let one = 0;
+    for (const u of units) if (!/\s/.test(String(u.text).trim())) one++;
+    return one > units.length * 0.6;
+  }
+
   function finishBuild(enRaw, uaRaw, sameLang, gen) {
     if (gen !== loadGen) { dbg('build finished after a newer load began — dropping it'); return true; }
     const enUnits = splitUnitsByPunct(enRaw);
     const uaUnits = sameLang ? enUnits : splitUnitsByPunct(uaRaw);
+    wordLevel = wordLevelTrack(enUnits);
 
     // Sentences first: the translation is aligned to them, and the lines then
     // take their share of that one alignment.
@@ -1343,7 +1360,9 @@
     sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
-    dbg(`ready: source ${enUnits.length} words / ${enLines.length} lines · ${sentences.length} sentences · ${state.targetLang.toUpperCase()} ${uaUnits.length} words / ${uaSents.length} sentences`);
+    dbg(`ready: source ${enUnits.length} units / ${enLines.length} lines · ${sentences.length} sentences · ` +
+        `${state.targetLang.toUpperCase()} ${uaUnits.length} units / ${uaSents.length} sentences · ` +
+        `${wordLevel ? 'word-level track: reveal word by word' : 'line-level track: whole sentence at once'}`);
     if (!sameLang) {
       const blank = uaSentences.reduce((k, s) => k + (s.units.length ? 0 : 1), 0);
       if (blank) dbg(`alignment: ${blank} of ${sentences.length} sentences got no translation`);
@@ -1631,8 +1650,18 @@
   }
 
   // How many EN words of a sentence should be visible at time t.
+  //
+  // On a line-level track: all of them, from the first frame. The reveal walks
+  // unit onsets, and there a unit is a whole caption line — so "word by word"
+  // was really "line by line", half a sentence appearing at once and taking the
+  // layout with it. The alternative is to invent the missing times by spreading
+  // them across the characters, and an invented time shows a word before it is
+  // spoken, which is worse than not pretending at all: a sentence is the unit
+  // this mode works in anyway (it is what playback stops at, and what you
+  // repeat), so on such a track it simply appears whole.
   function revealCount(s, t) {
     if (!s) return 0;
+    if (!wordLevel) return s.units.length;
     let n = 0;
     for (const u of s.units) { if (u.t <= t + LEAD) n++; else break; }
     return Math.max(1, n);
@@ -1644,6 +1673,10 @@
   // translation would still be missing at the moment the sentence pauses.
   function uaRevealCount(enS, uaS, t) {
     if (!enS || !uaS) return 0;
+    // The translation follows the source, including the decision above: a
+    // half-shown translation under a whole sentence is the same fragment
+    // ("…можуть зойкнути," with nothing to finish it) read twice.
+    if (!wordLevel) return uaS.units.length;
     const span = ((enS.stop != null ? enS.stop : enS.end) - enS.start) || 1;
     const p = clamp((t - enS.start) / span, 0, 1);
     return Math.max(1, Math.ceil(p * uaS.units.length));

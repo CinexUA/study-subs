@@ -9,6 +9,14 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Changed
+
+- On videos whose subtitles carry a time for each whole line rather than each
+  word — most hand-made tracks — a sentence now appears complete instead of
+  arriving in two pieces mid-thought. Those tracks never had the per-word times
+  such a reveal needs. Where they do exist, in YouTube's automatic captions,
+  the word-by-word reveal is unchanged.
+
 ### Fixed
 
 - On videos whose subtitles arrive as whole lines rather than single words —
