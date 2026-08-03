@@ -1623,6 +1623,13 @@
   // on the first foreign video. Brackets mean the same thing in all of them.
   const CUE_SQUARE_RE = /\[[^\]]*\]/g;
   const CUE_NOTES_RE = /[♪♫]/g;
+  // ">>" opening a line is the captioning convention for "a different person
+  // is speaking now". It is punctuation about the transcript, not words anyone
+  // said, and it lands in the reader as the first thing on screen (spotted in
+  // the wild 2026-08-03: ">> In 2014, my beautiful wife…"). Only at the START,
+  // and only the ASCII form: "»" is a closing quote in half the languages this
+  // has to survive, Ukrainian among them.
+  const CUE_SPEAKER_RE = /^\s*>>+\s*/;
   // Round brackets are the careful half, and the only place this can eat real
   // speech. Square ones are YouTube's own convention for non-speech and never
   // hold spoken words, so they come out wherever they sit — including a long
@@ -1637,7 +1644,8 @@
     const s = String(text == null ? '' : text);
     const round = CUE_ROUND_ONLY_RE.exec(s);
     if (round && round[1].trim().split(/\s+/).filter(Boolean).length <= CUE_ROUND_MAX_WORDS) return '';
-    return s.replace(CUE_SQUARE_RE, ' ').replace(CUE_NOTES_RE, ' ').replace(/\s+/g, ' ').trim();
+    return s.replace(CUE_SPEAKER_RE, '').replace(CUE_SQUARE_RE, ' ')
+      .replace(CUE_NOTES_RE, ' ').replace(/\s+/g, ' ').trim();
   }
 
   // Units keep their identity — only the text changes — so the timing model
