@@ -134,6 +134,30 @@
   let pauseGuardNoted = false;   // the guard logs once per pause, not per frame
   let hookedVideo = null;    // the <video> we attached play/seek/rate listeners to
 
+  // ---------- ads ----------
+  // An ad is not a small exception, it is a different clock: while one plays,
+  // currentTime, duration and playbackRate all belong to the spot, not to the
+  // video we are reading. Everything timing-related therefore asks adNow()
+  // first. Two class names because YouTube uses both, and being wrong in the
+  // over-inclusive direction is the cheap way to be wrong: freezing for a few
+  // seconds too long is an inconvenience, while missing a real ad means pausing
+  // it and fighting the player over its own playback.
+  // The names are measured, not folklore: on a live watch page YouTube's own
+  // stylesheets carry 156 rules mentioning `ad-showing` and 58 mentioning
+  // `ad-interrupting` (2026-08-03).
+  let hookedPlayer = null;   // #movie_player, cached so loop() does no DOM lookup
+  let simulateAd = false;    // the Advanced stand; deliberately never persisted
+  let adWas = false;         // previous adNow(), to catch the edges
+  let adSentIdx = 0;         // the sentence an ad interrupted
+  let adWaitUntil = 0;       // deadline for "the element is our video again"
+  let adResumePending = false;
+  function adNow() {
+    if (simulateAd) return true;
+    const p = hookedPlayer;
+    if (!p) return false;
+    return p.classList.contains('ad-showing') || p.classList.contains('ad-interrupting');
+  }
+
   // Where study stopped last time, per video. The playback position YouTube
   // restores drifts and sometimes falls back to zero, and a sentence is the
   // unit learning actually stops on.
@@ -419,6 +443,10 @@
     // The XML fallback parses a truncated body partially and without a word
     // about it; a truncated json3 fails JSON.parse and never gets this far.
     if (!json3) return 'XML fallback';
+    // `dur` below is the element's, and during an ad the element is the spot:
+    // a short track measured against a short duration passes the coverage test
+    // easily, and the result would sit on disk under this video's id.
+    if (adNow()) return 'an ad is playing';
     const dur = video && video.duration;
     // Covers a live stream (the track is still growing, and freezing it would
     // be a lie) and the rare load where metadata has not landed yet.
@@ -1096,6 +1124,7 @@
   // original request and never extended, so this can fight the player for at
   // most 250 ms and can never trap a user who wants to resume.
   function guardPause() {
+    if (adNow()) return;   // never hold a pause against an ad
     if (!pauseIntentAt || !video || video.paused) return;
     if (performance.now() - pauseIntentAt > 250) { pauseIntentAt = 0; return; }
     if (!pauseGuardNoted) { pauseGuardNoted = true; dbg('playback resumed right after our pause — holding it'); }
@@ -1131,7 +1160,10 @@
   const STOP_LEAD = 0.04;
   function armStop() {
     clearTimeout(stopTimer); stopTimer = null;
-    if (stopAt == null || !video || video.paused) return;
+    // This one is also the `play` listener, and an ad starting to play fires it
+    // — which is exactly how a stop meant for our sentence ended up scheduled
+    // against the spot's clock.
+    if (stopAt == null || !video || video.paused || adNow()) return;
     const left = (stopAt - video.currentTime) / (video.playbackRate || 1);
     // Inside the lead there is nothing left to aim early with: aim at the mark.
     const ms = Math.max(0, left > STOP_LEAD ? left - STOP_LEAD : left) * 1000;
@@ -1139,6 +1171,7 @@
   }
   function hitStop(who) {
     clearTimeout(stopTimer); stopTimer = null;
+    if (adNow()) return;   // that time belongs to the spot, not to a sentence
     if (stopAt == null || !video || video.paused) return;
     if (video.currentTime < stopAt - 0.005) { armStop(); return; } // fired early (seek lag / buffering)
     pauseVideo();
@@ -1187,7 +1220,7 @@
   // the sentence the audio is actually in — otherwise audio walks away while
   // the display stays frozen on a stale sentence.
   function resync() {
-    if (!state.reader || !sentences.length || !video) return;
+    if (!state.reader || !sentences.length || !video || adNow()) return;
     const t = video.currentTime || 0;
     const i = findSentenceAt(t);
     if (i !== sentIdx) { sentIdx = i; lastSig = null; }
@@ -1198,12 +1231,86 @@
 
   function onSeeked() {
     if (suppressSeek) { suppressSeek = false; return; }
+    if (adNow()) return;   // the ad's own seeks are not ours to answer
     resync();
+  }
+
+  // ---------- the two edges of an ad ----------
+  function onAdStart() {
+    adSentIdx = sentIdx;
+    // The stop timer is scheduled in real milliseconds against a clock that has
+    // just been swapped underneath it. Left armed it fires inside the spot and
+    // pauses it — and guardPause would then hold that pause for a quarter
+    // second against the player's own attempts to carry on.
+    clearTimeout(stopTimer); stopTimer = null;
+    stopAt = null;
+    adResumePending = false;
+    if (panel) panel.classList.add('ytds-ad');
+    dbg('ad started — the reader steps aside');
+  }
+
+  // True once the element is the video we have subtitles for again. When
+  // `ad-showing` clears, the element can still hold the spot's duration for
+  // another beat, and writing currentTime then lands inside the ad instead of
+  // inside our sentence. It also covers an ad pod for free: between two spots
+  // the duration is still an ad's, so we simply do not come back yet.
+  function contentBack() {
+    const dur = video && video.duration;
+    if (!dur || !isFinite(dur)) return false;
+    if (!sentences.length) return true;
+    return dur >= sentences[sentences.length - 1].end - 1;
+  }
+
+  function onAdLeave() {
+    // The panel returns first and unconditionally: it is what the user is
+    // waiting for, and it does not depend on the clock being trustworthy yet.
+    if (panel) panel.classList.remove('ytds-ad');
+    dbg('ad over');
+    // An ad's player response carries no caption tracks of ours, so loadCaptions
+    // deliberately left availability alone if it was answered during the spot.
+    // This is the first moment the real question can be asked.
+    if (availability === 'unknown' && !captionsReady) loadCaptions();
+    if (!state.reader) return;
+    adResumePending = true;
+    adWaitUntil = performance.now() + 3000;
+  }
+
+  function tryAdResume() {
+    // Bounded on purpose: on a video whose captions stop long before it does,
+    // contentBack() may never hold, and a frozen reader with no way out would
+    // be worse than resuming a beat early.
+    if (!contentBack() && performance.now() < adWaitUntil) return;
+    adResumePending = false;
+    if (!state.reader) return;
+    applySpeed();   // first — armStop computes its timer from playbackRate
+    if (state.study && sentences.length && adSentIdx >= 0) {
+      // A sentence half-heard before the ad and half after is not a repetition,
+      // it is noise. Free reading has no such unit, so it just picks up where
+      // the video is.
+      playSentence(adSentIdx);
+      dbg(`reader back — replaying sentence ${adSentIdx + 1}`);
+    } else {
+      resync();
+      dbg('reader back');
+    }
+  }
+
+  // Called from loop() while the reader is open, so the panel steps aside in
+  // the same frame the ad starts; and from tick() otherwise, where once a
+  // second is plenty for the things that still matter with the reader closed.
+  function pumpAd() {
+    const now = adNow();
+    if (now !== adWas) {
+      adWas = now;
+      if (now) onAdStart(); else onAdLeave();
+    }
+    if (adResumePending && !now) tryAdResume();
+    return now;
   }
 
   // Begin shadowing at whatever sentence the playhead is currently in.
   function armStudy() {
-    if (!video || !sentences.length) return;
+    if (!video || !sentences.length || adNow()) return;
     const t = video.currentTime || 0;
     sentIdx = findSentenceAt(t);
     stopAt = liveStop(t);
@@ -1328,6 +1435,10 @@
   // ears". So the element is written first (the stop timer needs it now) and
   // the wish goes to the player too.
   function applySpeed() {
+    // The guard belongs here too, not only in rateDrifted: tick() calls this on
+    // every video change while the reader is open, and a pre-roll is exactly
+    // when that lands.
+    if (adNow()) return;
     const want = state.speed || 1;
     if (video) { try { video.playbackRate = want; } catch (_) {} }
     window.postMessage({ type: 'YTDS_SET_RATE', rate: want }, '*');
@@ -1339,7 +1450,10 @@
   // insists cannot turn this into a loop. Only while the overlay is open: with
   // it closed the speed on YouTube is the user's own business, not ours.
   let rateFixAt = 0, rateFixNoted = false;
-  const rateDrifted = () => !!video && Math.abs(video.playbackRate - (state.speed || 1)) > 0.01;
+  // An ad has no drift to speak of: its rate is its own business, and putting
+  // ours back onto a spot is both wrong and the kind of interference nobody
+  // wants a subtitle extension doing.
+  const rateDrifted = () => !!video && !adNow() && Math.abs(video.playbackRate - (state.speed || 1)) > 0.01;
   function enforceRate() {
     const now = performance.now();
     if (now - rateFixAt < 400) return;
@@ -1524,7 +1638,11 @@
     const { tracks, isLive, answered } = await requestTracks();
     // The one place the entry buttons learn there is nothing to open. Silence
     // leaves them alone: see requestTracks on why `answered` is separate.
-    if (answered) availability = isLive ? 'live' : (tracks.length ? 'ready' : 'none');
+    // Not while an ad is on. During a pre-roll the player can answer for the
+    // spot, whose response carries no caption tracks of ours — and a single
+    // 'none' settled there would grey the pill out for the whole video, on a
+    // video that does have subtitles. onAdLeave asks again.
+    if (answered && !adNow()) availability = isLive ? 'live' : (tracks.length ? 'ready' : 'none');
     dbg(`tracks from playerResponse: ${tracks.length}` +
         (tracks.length ? ' [' + tracks.map((t) => `${t.lang}${t.kind === 'asr' ? '/asr' : ''}`).join(', ') + ']' : '') +
         (isLive ? ' · live stream' : '') + (answered ? '' : ' · the player never answered'));
@@ -1598,6 +1716,10 @@
   }
 
   async function handleCaptured(url, body) {
+    // Ads carry captions of their own. Taking one here would label the spot's
+    // track as this video's — in capturedBase, and from there into the cache
+    // under the video's id.
+    if (adNow()) { dbg('intercepted timedtext during an ad — ignored'); return; }
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
     const empty = !(body || '').length;
@@ -1696,6 +1818,9 @@
   function loop() {
     rafId = requestAnimationFrame(loop);
     if (!state.reader) return;
+    // First in the frame, before anything reads the clock. An ad frame is
+    // therefore cheaper than an ordinary one: no controls, no guard, no render.
+    if (pumpAd()) return;
     updateControls();
     guardPause();
     // The precise stop timer does the real work; this is a backup.
@@ -2257,6 +2382,26 @@
     return btn;
   }
 
+  // A stand, not a feature. Ads are the one path the author cannot reach —
+  // a Premium account never shows one — so without this the whole ad branch
+  // would be written blind and every later regression in it would be invisible.
+  // It drives the same adNow() the real class does, which is the point: what is
+  // exercised here is the code that runs for real, not a rehearsal of it.
+  // Never persisted (see simulateAd): a debug flag that survives a reload is a
+  // trap, and this one freezes the reader.
+  function buildSimulateAd() {
+    const btn = mkBtn('ytds-text-btn', 'Pretend a YouTube ad is playing, to check that the reader steps aside and comes back', () => {
+      simulateAd = !simulateAd;
+      btn.textContent = simulateAd ? 'Stop simulating' : 'Simulate ad';
+      btn.classList.toggle('ytds-ok', simulateAd);
+      // The edge is normally caught by loop(), which is not running with the
+      // drawer's own click still in flight — pump it here so the panel reacts
+      // to the very click that asked for it.
+      pumpAd();
+    }, txt('Simulate ad'));
+    return btn;
+  }
+
   // The clipboard API needs the document focused, and inside our own
   // fullscreen element that is not a given — the old way still works there.
   function copyFallback(text) {
@@ -2292,7 +2437,7 @@
     // language, size, speed, study mode, the theme — is deliberately NOT
     // duplicated here. What is left is what you never touch while watching.
     const btnRow = el('div', 'ytds-btn-row');
-    btnRow.append(buildCopyLog(), buildReloadCaptions());
+    btnRow.append(buildCopyLog(), buildReloadCaptions(), buildSimulateAd());
 
     // Under Advanced, above the log: the version is read in exactly the moment
     // the log is, and it is the first line of what Copy log hands over — so
@@ -2487,6 +2632,17 @@
     document.documentElement.classList.add('ytds-reader');
     if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
     syncUi();
+    // Opening the reader in the middle of an ad passes no edge, so pumpAd()
+    // would never put the panel aside — it would come back on top of the spot.
+    // `-1` says "we never saw which sentence this was": there is nothing to
+    // replay, so the return picks up wherever the video actually is.
+    if (adNow()) {
+      panel.classList.add('ytds-ad');
+      adSentIdx = -1;
+      adResumePending = true;
+      adWaitUntil = performance.now() + 3000;
+      dbg('reader opened during an ad — waiting it out');
+    }
     wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
@@ -2524,6 +2680,9 @@
     sentenceDone = false;
     clearTimeout(stopTimer); stopTimer = null;
     closeDrawer();
+    // Otherwise a reader reopened during the same ad would come back invisible.
+    if (panel) panel.classList.remove('ytds-ad');
+    adResumePending = false;
     document.documentElement.classList.remove('ytds-reader');
     if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
     if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
@@ -2670,6 +2829,9 @@
   // ---------- lifecycle ----------
   function tick() {
     if (location.pathname !== '/watch') return;
+    // Cached here, where the swapped <video> is already dealt with, so that
+    // adNow() costs two classList reads per frame instead of a DOM lookup.
+    hookedPlayer = document.getElementById('movie_player');
     video = document.querySelector('video.html5-main-video') || document.querySelector('video');
     if (video && video !== hookedVideo) {
       // YouTube swaps the element (an ad, a quality change, a new video), and
@@ -2685,6 +2847,11 @@
       video.addEventListener('seeked', onSeeked);
       if (state.reader) applySpeed(); // a fresh element starts at 1×, whatever our menu says
     }
+    // After the element is in hand, not before: coming back from an ad reads
+    // its duration. With the reader open loop() pumps this 60 times a second;
+    // this call covers the rest — the caption load and the cache, which care
+    // about ads just as much and are in no hurry.
+    pumpAd();
     ensurePanel();
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {

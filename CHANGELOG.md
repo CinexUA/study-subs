@@ -9,6 +9,17 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Fixed
+
+- Ads are no longer treated as part of the video you are studying. The reader
+  steps aside for the whole ad — the ad stays visible and its **Skip** button
+  stays clickable — and comes back on its own when the ad is over, replaying
+  the sentence the ad interrupted from its beginning. Along the way the ad
+  stops being paused by the sentence stop, stops being played at your study
+  speed, and its own subtitles can no longer end up saved as the video's.
+  Nothing here changes for YouTube Premium, which is why it went unnoticed
+  for so long.
+
 ### Changed
 
 - **Dual subtitles** no longer opens onto videos it has nothing to show. On a

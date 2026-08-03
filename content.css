@@ -89,6 +89,26 @@
   color: var(--ink);
   transition: background-color var(--d5) var(--ease-inout), color var(--d5) var(--ease-inout);
 }
+/* An ad is playing: the reader gets out of its way completely — the spot has to
+   be seen, and its Skip button has to be reachable.
+
+   `visibility` is not a style choice here, it is the only one of the three that
+   works. `display: none` removes the fullscreen element, so the browser leaves
+   fullscreen and the fullscreenchange handler closes the reader outright — an
+   ad would end the lesson. `opacity: 0` is invisible but still hit-tested, so
+   this panel would keep swallowing the click meant for Skip Ad. Only
+   `visibility: hidden` is unpainted, unclickable AND still in the top layer,
+   which is what keeps us in fullscreen for the return.
+
+   The backdrop is the other half: it is the black sheet the browser paints
+   behind a fullscreen element, and it — not the panel — is what hides the page.
+   Transparent, the watch page and its ad show through.
+
+   No transition on purpose: a fade would mean frames where the ad is still
+   behind our panel. */
+.ytds-panel.ytds-ad { visibility: hidden; }
+.ytds-panel.ytds-ad::backdrop { background: transparent; }
+
 .ytds-panel, .ytds-panel *, .ytds-panel *::before, .ytds-panel *::after { box-sizing: border-box; }
 /* Reset wrapped in :where() so it keeps the page's button styles out without
    outweighing our own component rules (a plain `.ytds-panel button` selector
@@ -660,8 +680,12 @@
   padding: 0 calc(2 * var(--u)) calc(2 * var(--u));
 }
 .ytds-drawer-body .ytds-text-btn { align-self: flex-start; }
-/* Copy log and Reload captions stand in a row, not in a stack. */
-.ytds-btn-row { display: flex; gap: calc(.9 * var(--u)); }
+/* Copy log, Reload captions and Simulate ad: a row that wraps, not a stack.
+   The wrapping is load-bearing, not tidiness — the drawer is a fixed 34u wide
+   with overflow hidden, so a third button on one line is not squeezed, it is
+   cut off past the edge. That is exactly how Simulate ad first shipped
+   invisible. Anything added here later wraps instead of disappearing. */
+.ytds-btn-row { display: flex; flex-wrap: wrap; gap: calc(.9 * var(--u)); }
 .ytds-group-title {
   margin: calc(1.8 * var(--u)) 0 calc(.5 * var(--u));
   display: flex;
