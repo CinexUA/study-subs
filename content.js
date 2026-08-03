@@ -125,6 +125,12 @@
   // time at which playback should stop (null = free play).
   let sentences = [];    // EN sentences (drive playback timing + EN reveal)
   let uaSentences = [];  // translation sentences, index-aligned to `sentences`
+  // Phrase pairing per sentence, filled in the first time one is pointed at.
+  // Memory only, and thrown away with the sentences it describes: it is a
+  // derivative of the track, costs microseconds, and keeping it on disk would
+  // be one more thing that can drift apart from a re-parse.
+  let chunkCache = {};
+  let litChunk = null;   // the target currently pointed at, or null
   // Does this track carry a time per WORD, or only per caption line? The
   // word-by-word reveal is only honest on the first kind; see wordLevelTrack().
   let wordLevel = true;
@@ -1045,6 +1051,94 @@
     return out;
   }
 
+  // ---- Pointing at a phrase --------------------------------------------
+  //
+  // A long sentence reads fine until one place in it does not, and then the
+  // work is finding that place again in the translation below. Pointing at it
+  // should answer that, and the unit of the answer is a PHRASE, never a word:
+  // "an apple" is "яблуко", and no local rule can pair those two — English and
+  // Ukrainian share neither roots nor alphabet, so a word-level pairing needs a
+  // dictionary, a network call and a host permission. A phrase between commas
+  // is what the data can honestly support.
+  //
+  // Which makes this the same problem as fitting a translation to its source,
+  // one floor down — so it is the same solver: alignSentences knows nothing
+  // about sentences, it is a monotone DP over two arrays of {start, units,
+  // full}. Measured on a real track (f_N3PGvnVKg, 2026-08-03): of the sentences
+  // longer than one screen line, 69% carry two or more phrases, and of 86
+  // targets not one came out with an empty translation.
+  const CHUNK_END_RE = /[,;:—–]$/;
+  const CHUNK_TRAIL_RE = /["»”'’)\]]+$/;
+
+  // A phrase ends where a WORD ends with one of those marks. Reading the word
+  // rather than the character is what keeps 1,500 and 3:45 whole for free.
+  function splitIntoChunks(text) {
+    const words = String(text == null ? '' : text).trim().split(/\s+/).filter(Boolean);
+    const chunks = [];
+    let cur = [];
+    for (let i = 0; i < words.length; i++) {
+      cur.push({ t: 0, text: words[i], i });
+      if (CHUNK_END_RE.test(words[i].replace(CHUNK_TRAIL_RE, ''))) { chunks.push(cur); cur = []; }
+    }
+    if (cur.length) chunks.push(cur);
+    // `start: 0` on every phrase is deliberate: it makes the aligner's time
+    // anchor a constant, which is the honest reading of what we have. Inside a
+    // sentence a translated word's onset is either interpolated (a line-level
+    // track has no word times at all) or moved along with the word itself.
+    // `units` are the phrase's WORDS so that sliceByChars can really divide a
+    // merged phrase — handed an empty array it returns nothing, and the text of
+    // every 2:1 and 3:1 move would be lost. `i` is how the words are read back
+    // afterwards: the objects travel through concat and sliceByChars unchanged.
+    return chunks.map((ws) => ({ start: 0, units: ws, full: ws.map((w) => w.text).join(' ') }));
+  }
+
+  // Targets of one sentence, or null when there is nothing finer to say (no
+  // internal punctuation on one of the two sides) — then pointing lights the
+  // whole line, which is what it did before this existed.
+  function buildChunkPairs(enText, uaText) {
+    const enC = splitIntoChunks(enText), uaC = splitIntoChunks(uaText);
+    if (enC.length < 2 || uaC.length < 2) return null;
+    const buckets = alignSentences(uaC, enC);   // one bucket per English phrase
+
+    // Pointing must never answer with nothing, so a phrase the aligner left
+    // without a translation is not a target of its own: it joins the neighbour
+    // that has one. Fewer targets than commas, but every one of them says
+    // something.
+    const groups = [];
+    for (let i = 0; i < buckets.length; i++) {
+      const words = buckets[i].units;
+      if (!words.length && groups.length) { groups[groups.length - 1].en.push(i); continue; }
+      groups.push({ en: [i], ua: words.map((w) => w.i) });
+    }
+    while (groups.length > 1 && !groups[0].ua.length) {
+      groups[1].en = groups[0].en.concat(groups[1].en);
+      groups.shift();
+    }
+    if (groups.length < 2) return null;
+
+    // Word index -> target, for both sides, which is all the renderer needs: it
+    // walks its own words and asks which target each of them belongs to.
+    const enOf = [], uaOf = [];
+    groups.forEach((g, gi) => {
+      for (const ci of g.en) for (const w of enC[ci].units) enOf[w.i] = gi;
+      for (const wi of g.ua) uaOf[wi] = gi;
+    });
+    return { count: groups.length, enOf, uaOf };
+  }
+
+  // Lazy on purpose: nothing here runs until the reader points at a sentence,
+  // so the render loop and the caption build stay exactly as cheap as they are.
+  function chunkPairs(i) {
+    if (i < 0 || i >= sentences.length) return null;
+    if (Object.prototype.hasOwnProperty.call(chunkCache, i)) return chunkCache[i];
+    const uaS = uaSentences[i];
+    const pairs = uaS && uaS.units.length
+      ? buildChunkPairs(joinUnits(sentences[i].units), joinUnits(uaS.units))
+      : null;
+    chunkCache[i] = pairs;
+    return pairs;
+  }
+
   // Free reading shows lines, not sentences, and a line may start mid-sentence
   // (too long, too slow) or hold two short ones. So the translation is aligned
   // once, per sentence, and the lines then take their share of it: a line gets
@@ -1675,7 +1769,7 @@
     loadGen++;
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     captionsReady = false;
-    sentences = []; uaSentences = []; sentIdx = 0; stopAt = null; sentenceDone = false;
+    sentences = []; uaSentences = []; chunkCache = {}; sentIdx = 0; stopAt = null; sentenceDone = false;
     // Without this the notches survive into the next video, and two videos of
     // the same length with the same sentence count would never redraw them.
     ticksDur = 0; ticksLen = -1;
@@ -1904,7 +1998,10 @@
       const uaS = uaSentences[sentIdx];
       const enN = revealCount(enS, t);
       const uaN = uaRevealCount(enS, uaS, t);
-      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+      // `paused` is in the signature because stopping is what turns the
+      // sentence into pointable phrases: without it the frame that stops looks
+      // identical to the one before and the gate would eat the repaint.
+      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
       if (sig === lastSig) return;
       const fresh = sentIdx !== lastIdx;
       lastSig = sig; lastIdx = sentIdx;
@@ -1963,13 +2060,35 @@
     return Math.max(1, Math.ceil(p * uaS.units.length));
   }
 
+  // Pointing at a phrase needs the sentence in pieces, and it is only offered
+  // while playback is stopped ON A WHOLE sentence. Two reasons, and the second
+  // is the real one: a pairing computed against half a sentence is a DIFFERENT
+  // pairing, so it would answer confidently and wrongly. (On a line-level track
+  // the sentence is whole from its first frame, so an ordinary pause counts
+  // there too — which is why this asks the reveal rather than `sentenceDone`.)
+  function pointable(enS, enN) {
+    return !!(video && video.paused && enS && enN >= enS.units.length && !adNow());
+  }
+
   // Two fixed zones split by the hairline: EN sits just ABOVE it (grows
   // upward, its baseline never moves), the translation just below.
   function renderStudy(enS, uaS, enN, uaN, fresh) {
     if (!elZoneEn) return;
     hideNote();
-    paint(elZoneEn, 'ytds-en', state.showEn && enS ? [{ text: joinUnits(enS.units.slice(0, enN)), fresh }] : []);
-    paint(elZoneUa, 'ytds-ua', state.showUa && uaS ? [{ text: joinUnits(uaS.units.slice(0, uaN)), fresh }] : []);
+    const pairs = pointable(enS, enN) ? chunkPairs(sentIdx) : null;
+    const enWords = enS ? joinUnits(enS.units.slice(0, enN)) : '';
+    const uaWords = uaS ? joinUnits(uaS.units.slice(0, uaN)) : '';
+    paint(elZoneEn, 'ytds-en', state.showEn && enS
+      ? [{ text: enWords, fresh, chunks: pairs && pairs.enOf }] : []);
+    // The translation zone is painted even with the UK chip off, hidden by
+    // class rather than left empty: that is what lets one phrase appear on
+    // demand, and appear in the PLACE it holds in the line. Hover then only
+    // ever toggles classes — it can never reach the render loop.
+    paint(elZoneUa, 'ytds-ua', (state.showUa || pairs) && uaS
+      ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf }] : []);
+    elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
+    elStage.classList.toggle('ytds-pointable', !!pairs);
+    if (pairs) hintOnce();
   }
 
   function renderLines(en, ua, fresh) {
@@ -1977,6 +2096,11 @@
     hideNote();
     paint(elZoneEn, 'ytds-en', state.showEn ? lineItems(enLines, en, fresh) : []);
     paint(elZoneUa, 'ytds-ua', state.showUa ? lineItems(uaLines, ua, fresh) : []);
+    // Free reading shows lines, and lines are aligned by a different route
+    // (spreadToLines), so there are no phrases to point at here. Both marks
+    // are dropped rather than left over from the mode before.
+    elZoneUa.classList.remove('ytds-ua-off');
+    elStage.classList.remove('ytds-pointable');
   }
 
   // The previous line (dimmed) plus the current one, revealed word by word.
@@ -1988,12 +2112,45 @@
     return items;
   }
 
+  // One span per phrase, carrying the target it belongs to. Words the pairing
+  // does not know (it is built from the whole sentence, the reveal may be
+  // showing less) go in a span of their own with no target, so they are never
+  // silently attached to a neighbour's answer.
+  function chunkSpans(line, text, ofWord) {
+    const words = text.split(/\s+/).filter(Boolean);
+    let at = 0;
+    while (at < words.length) {
+      const g = ofWord[at];
+      let to = at;
+      while (to + 1 < words.length && ofWord[to + 1] === g) to++;
+      const span = el('span', 'ytds-chunk', words.slice(at, to + 1).join(' '));
+      if (g != null) span.dataset.g = String(g);
+      line.appendChild(span);
+      // The space between two phrases stays OUTSIDE both, or the highlight
+      // would run a space past its last word and touch the next phrase.
+      if (to + 1 < words.length) line.appendChild(document.createTextNode(' '));
+      at = to + 1;
+    }
+  }
+
   // `fresh` only on a new line/sentence: the node is rebuilt on every word, so
   // carrying the class over would replay the entrance animation each time.
   function paint(zone, cls, items) {
+    // The spans a highlight was living on are about to be thrown away, so the
+    // memory of it has to go too — otherwise pointing back at the same phrase
+    // is a no-op and it never lights again.
+    litChunk = null;
+    if (elStage) elStage.classList.remove('ytds-pointing');
     zone.textContent = '';
     for (const it of items) {
       const block = el('div', 'ytds-block' + (it.dim ? '' : ' ytds-active') + (it.fresh ? ' ytds-fresh' : ''));
+      if (it.chunks) {
+        const line = el('span', 'ytds-line ' + cls);
+        chunkSpans(line, it.text, it.chunks);
+        block.appendChild(line);
+        zone.appendChild(block);
+        continue;
+      }
       block.appendChild(el('span', 'ytds-line ' + cls, it.text));
       zone.appendChild(block);
     }
@@ -2227,7 +2384,44 @@
 
     elStage = el('div', 'ytds-stage');
     elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, buildResumeCard());
+
+    // One listener for the whole stage rather than one per phrase: the
+    // sentence is rebuilt on every revealed word, and per-span listeners would
+    // be re-attached that many times. Nothing here reads geometry, and nothing
+    // here can reach the render loop — pointing only ever moves classes.
+    elStage.addEventListener('mouseover', (e) => {
+      const t = e.target;
+      if (!t || !t.closest) return;
+      const span = t.closest('.ytds-chunk');
+      if (span) { lightChunk(span.dataset.g != null ? span.dataset.g : null); return; }
+      // The bare space between two phrases belongs to neither. Letting it
+      // clear the highlight would blink it off every time the cursor crosses
+      // a word boundary, so inside a line nothing is cleared.
+      if (t.closest('.ytds-line')) return;
+      lightChunk(null);
+    });
+    elStage.addEventListener('mouseleave', () => lightChunk(null));
     return elStage;
+  }
+
+  function lightChunk(g) {
+    if (g === litChunk) return;
+    litChunk = g;
+    if (!elStage) return;
+    elStage.querySelectorAll('.ytds-chunk.ytds-lit').forEach((n) => n.classList.remove('ytds-lit'));
+    elStage.classList.toggle('ytds-pointing', g != null);
+    if (g == null) return;
+    elStage.querySelectorAll(`.ytds-chunk[data-g="${g}"]`).forEach((n) => n.classList.add('ytds-lit'));
+  }
+
+  // Said once per page session, and only where there is something to point at:
+  // the phrases carry no permanent marking, so without a word the first time
+  // the whole feature is invisible.
+  let hintedPointing = false;
+  function hintOnce() {
+    if (hintedPointing) return;
+    hintedPointing = true;
+    showHint('Point at a phrase to see its translation');
   }
 
   // The offer to pick learning up where it stopped. It lives on the stage

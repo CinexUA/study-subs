@@ -351,6 +351,41 @@
   letter-spacing: -.012em;
   color: var(--accent);
 }
+/* ---------- Pointing at a phrase ----------
+   Offered only while playback is stopped on a whole sentence. There is no
+   permanent marking of the phrases: the complaint this answers was that there
+   is already too much to read, so the only thing that ever appears is what the
+   cursor is on.
+
+   NO PADDING on a phrase, and that is a rule rather than a preference: any
+   would change where the words wrap, and the sentence would jump from two
+   lines to three at the mere sight of a cursor. A background alone cannot move
+   anything. box-decoration-break, because a phrase is often broken across
+   lines, and without it the background is drawn as one rectangle spanning the
+   whole line — over its neighbours' words. */
+.ytds-chunk {
+  border-radius: calc(.3 * var(--u));
+  transition: background-color var(--d2) var(--ease-out), opacity var(--d2) var(--ease-out);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.ytds-pointable .ytds-chunk.ytds-lit { background-color: var(--bg-hover); }
+/* Only the translation steps back, never the source. The English line is the
+   one being read; dimming four fifths of it every time the cursor crosses it
+   would fight the reading instead of helping it. */
+.ytds-pointing .ytds-zone-ua .ytds-chunk { opacity: .28; }
+.ytds-pointing .ytds-zone-ua .ytds-chunk.ytds-lit { opacity: 1; }
+
+/* Translation off: the same thing, one intensity further — the rest is not
+   dimmed but gone, and a phrase appears alone when asked for.
+   `visibility`, never `display`: a hidden phrase KEEPS ITS PLACE, so the one
+   that shows stands exactly where it stands in the whole line. That position
+   is the answer to "is this the start or the end of the sentence" — with
+   display:none the only visible phrase would slide to the centre and lie
+   about it. */
+.ytds-zone-ua.ytds-ua-off .ytds-chunk { visibility: hidden; }
+.ytds-zone-ua.ytds-ua-off .ytds-chunk.ytds-lit { visibility: visible; opacity: 1; }
+
 .ytds-fresh { animation: ytds-sub-in 420ms var(--ease-out) both; }
 .ytds-zone-ua .ytds-fresh { animation-delay: 60ms; }
 .ytds-block.ytds-fresh { animation-fill-mode: backwards; }
