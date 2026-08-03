@@ -2177,7 +2177,8 @@
     panel.addEventListener('mousemove', (e) => { ptr = { x: e.clientX, y: e.clientY }; wake(e); });
     panel.addEventListener('click', wake);
     elHint = el('div', 'ytds-hint');
-    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer(), elHint);
+    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer(),
+                 buildSimExit(), elHint);
     syncUi();
     return true;
   }
@@ -2452,17 +2453,40 @@
   // exercised here is the code that runs for real, not a rehearsal of it.
   // Never persisted (see simulateAd): a debug flag that survives a reload is a
   // trap, and this one freezes the reader.
+  let btnSimAd = null;   // the drawer's stand button, whose label follows the flag
+
+  // One place sets the flag, because two controls turn it off: the drawer
+  // button and the chip below. They must never disagree about the label.
+  function setSimulateAd(on) {
+    simulateAd = !!on;
+    if (panel) panel.classList.toggle('ytds-sim', simulateAd);
+    if (btnSimAd) {
+      btnSimAd.textContent = simulateAd ? 'Stop simulating' : 'Simulate ad';
+      btnSimAd.classList.toggle('ytds-ok', simulateAd);
+    }
+    // The edge is normally caught by loop(), which is not running while the
+    // click that asked for it is still in flight — pump it here so the panel
+    // reacts to that very click.
+    pumpAd();
+  }
+
   function buildSimulateAd() {
-    const btn = mkBtn('ytds-text-btn', 'Pretend a YouTube ad is playing, to check that the reader steps aside and comes back', () => {
-      simulateAd = !simulateAd;
-      btn.textContent = simulateAd ? 'Stop simulating' : 'Simulate ad';
-      btn.classList.toggle('ytds-ok', simulateAd);
-      // The edge is normally caught by loop(), which is not running with the
-      // drawer's own click still in flight — pump it here so the panel reacts
-      // to the very click that asked for it.
-      pumpAd();
-    }, txt('Simulate ad'));
-    return btn;
+    btnSimAd = mkBtn('ytds-text-btn', 'Pretend a YouTube ad is playing, to check that the reader steps aside and comes back',
+      () => setSimulateAd(!simulateAd), txt('Simulate ad'));
+    return btnSimAd;
+  }
+
+  // The stand's way out, and the reason it needs one: everything inside the
+  // panel goes visibility:hidden while an ad is on — including the drawer
+  // button that started the simulation. Simulate ad was a one-way door, and
+  // since the flag survives closing the reader, reopening it just showed an
+  // invisible panel again; only a page reload cleared it.
+  // Visible ONLY while simulating (`ytds-sim`), never during a real ad: putting
+  // a control of ours on top of somebody's advert is the one thing this whole
+  // feature exists to avoid.
+  function buildSimExit() {
+    return mkBtn('ytds-sim-exit', 'End the simulated ad and bring the reader back',
+      () => setSimulateAd(false), txt('Simulating an ad — click to stop'));
   }
 
   // The clipboard API needs the document focused, and inside our own
@@ -2762,6 +2786,11 @@
     // fullscreen, and that one is not ours to close.
     if (document.fullscreenElement === document.documentElement) document.exitFullscreen().catch(() => {});
     if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
+    // The stand belongs to a reading session, so closing it ends the pretence.
+    // Left on, adNow() would keep answering yes with the reader shut — the
+    // caption loader and the cache would go on believing an ad was playing, and
+    // nothing on screen would say why. Last, when state.reader is already false.
+    if (simulateAd) setSimulateAd(false);
     syncUi();
   }
 

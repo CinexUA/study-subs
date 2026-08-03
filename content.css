@@ -110,6 +110,30 @@
    behind our panel. */
 .ytds-panel.ytds-ad { visibility: hidden; }
 
+/* The stand's escape hatch. `visibility` is inherited but overridable, so this
+   one child stays painted and clickable while the rest of the panel is not —
+   which is the whole reason the mechanism is `visibility` and not `opacity`.
+   Both classes are required: `ytds-sim` is only set by Simulate ad, so a real
+   ad never gets a control of ours sitting on top of it. Bottom-left, away from
+   the player's own controls and its Skip button. */
+.ytds-sim-exit { display: none; }
+.ytds-panel.ytds-ad.ytds-sim .ytds-sim-exit {
+  display: block;
+  visibility: visible;
+  position: absolute;
+  left: calc(2 * var(--u));
+  bottom: calc(2 * var(--u));
+  z-index: 40;
+  padding: calc(.8 * var(--u)) calc(1.4 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font: 600 calc(1.05 * var(--u)) / 1.2 var(--sans);
+  color: var(--accent-ink);
+  background-color: var(--accent);
+  box-shadow: var(--e4);
+  cursor: pointer;
+}
+
 .ytds-panel, .ytds-panel *, .ytds-panel *::before, .ytds-panel *::after { box-sizing: border-box; }
 /* Reset wrapped in :where() so it keeps the page's button styles out without
    outweighing our own component rules (a plain `.ytds-panel button` selector
