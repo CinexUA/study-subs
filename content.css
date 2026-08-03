@@ -874,6 +874,14 @@
 }
 .ytds-cta:hover { background: color-mix(in srgb, currentColor 14%, transparent); }
 .ytds-cta:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+
+/* This video has no subtitles, or it is a stream still running. The pill keeps
+   its place in the row — see ensureActionButton for why it does not vanish the
+   way the player button does — and stops pretending to be pressable: no hand,
+   no hover lift, faint enough to read as "not this video" rather than as a
+   button that failed. The reason itself lives in the tooltip. */
+.ytds-cta[disabled] { opacity: .38; cursor: default; }
+.ytds-cta[disabled]:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .ytds-cta svg { width: 24px; height: 24px; display: block; flex: 0 0 auto; }
 
 /* Below this the watch page has already given the actions their own line and

@@ -90,6 +90,21 @@
   // needs the player switched on — and that waits for the overlay. See the tail
   // of loadCaptions for why.
   let pokePending = false;
+  // Is there anything to open on this video at all — asked before the overlay,
+  // not inside it. It stays 'unknown' until the player response answers (up to
+  // 4.5 s, see requestTracks), and the buttons work meanwhile: a control that
+  // is dead for the first seconds of every video is a worse lie than one that
+  // opens onto "loading…". Nothing here touches the player's CC.
+  let availability = 'unknown';   // unknown | ready | none | live
+  const WHY_BLOCKED = {
+    none: 'This video has no subtitles — nothing to read here',
+    live: 'Live streams have no finished subtitles yet — try the recording afterwards'
+  };
+  const blockedWhy = () => WHY_BLOCKED[availability] || '';
+  // Live wins over everything: a stream can carry a caption track and still be
+  // unreadable to us, because the timing model needs an end and there is none.
+  const markAvailable = () => { if (availability !== 'live') availability = 'ready'; };
+
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let captureRetries = 0, sawTracks = false;
@@ -233,6 +248,10 @@
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
   // ---------- MAIN-world bridge ----------
+  // Resolves { tracks, isLive, answered }. `answered` is its own field because
+  // "the player says this video has no caption tracks" and "the player never
+  // said anything" look identical in an empty array — and only the first of
+  // them is grounds for switching the entry buttons off.
   function requestTracks() {
     return new Promise((resolve) => {
       let done = false, tries = 0;
@@ -240,14 +259,17 @@
         if (e.source !== window || !e.data || e.data.type !== 'YTDS_TRACKS') return;
         window.removeEventListener('message', onMsg);
         done = true;
-        resolve(e.data.tracks || []);
+        resolve({ tracks: e.data.tracks || [], isLive: !!e.data.isLive, answered: true });
       };
       window.addEventListener('message', onMsg);
       (function ask() {
         if (done) return;
         window.postMessage({ type: 'YTDS_REQUEST_TRACKS' }, '*');
         if (++tries < 15) setTimeout(ask, 300);
-        else { window.removeEventListener('message', onMsg); resolve([]); }
+        else {
+          window.removeEventListener('message', onMsg);
+          resolve({ tracks: [], isLive: false, answered: false });
+        }
       })();
     });
   }
@@ -1388,6 +1410,7 @@
       if (blank) dbg(`alignment: ${blank} of ${sentences.length} sentences got no translation`);
     }
     captionsReady = true;
+    markAvailable();   // subtitles in hand is the last word on whether any exist
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
     if (state.reader && state.study) armStudy();
@@ -1482,11 +1505,14 @@
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false; pokePending = false;
     captureRetries = 0; sawTracks = false;
+    availability = 'unknown';
     clearTimeout(captureTimer);
     clearDisplay();
     setStatus('loading…');
     dbg('--- loadCaptions for ' + currentVideoId);
 
+    // A hit here is the strongest answer there is: we have read this video's
+    // subtitles before and they are on disk.
     if (await buildFromCache()) return;
 
     if (capturedBase && capturedForVideo === currentVideoId) {
@@ -1495,15 +1521,34 @@
       dbg('cached URL failed (token may have expired)');
     }
 
-    const tracks = await requestTracks();
+    const { tracks, isLive, answered } = await requestTracks();
+    // The one place the entry buttons learn there is nothing to open. Silence
+    // leaves them alone: see requestTracks on why `answered` is separate.
+    if (answered) availability = isLive ? 'live' : (tracks.length ? 'ready' : 'none');
     dbg(`tracks from playerResponse: ${tracks.length}` +
-        (tracks.length ? ' [' + tracks.map((t) => `${t.lang}${t.kind === 'asr' ? '/asr' : ''}`).join(', ') + ']' : ''));
+        (tracks.length ? ' [' + tracks.map((t) => `${t.lang}${t.kind === 'asr' ? '/asr' : ''}`).join(', ') + ']' : '') +
+        (isLive ? ' · live stream' : '') + (answered ? '' : ' · the player never answered'));
+    if (isLive) {
+      dbg('live stream: no finished track to time against — not offering the reader');
+      setStatus('live streams have no finished subtitles yet');
+      return;
+    }
     if (tracks.length) {
       sawTracks = true;
       const src = pickSrc(tracks);
       srcLang = src.lang || '';
       if (await buildFromBase(src.baseUrl, null, '')) { dbg('direct fetch succeeded'); return; }
       dbg('direct fetch returned 0 → need interception');
+    }
+
+    // The player has spoken and it lists no tracks. Switching its CC on could
+    // not produce a request for something that does not exist — it would only
+    // leave the captions on. This used to run anyway, on the hope that
+    // interception would turn something up.
+    if (availability === 'none') {
+      dbg('the player lists no caption tracks — nothing to enable, and nothing to wait for');
+      setStatus('this video has no YouTube captions');
+      return;
     }
 
     // Everything above this line is silent: it reads our own cache, fetches a
@@ -2426,6 +2471,11 @@
 
   // ---------- reader (study) mode ----------
   function enterReader() {
+    // The buttons are already off by now, but they are not the only door — and
+    // a rule about whether the feature may open belongs with the opening, not
+    // scattered across the two things that draw a button.
+    const why = blockedWhy();
+    if (why) { dbg('not opening the reader — ' + why); return; }
     ensurePanel();
     // Draw first, persist last. Remembering that the overlay was open is a
     // convenience; opening it is the whole feature, and a write that throws
@@ -2548,7 +2598,14 @@
     // only first in document order until YouTube decides otherwise.
     const p = document.getElementById('movie_player');
     const rc = (p || document).querySelector('.ytp-right-controls');
-    if (!rc || rc.querySelector('.ytds-launch')) return;
+    if (!rc) return;
+    const existing = rc.querySelector('.ytds-launch');
+    // In the control bar the convention is set by the neighbours: YouTube's own
+    // CC button is simply absent on a video with no captions, so ours goes too
+    // rather than sitting there greyed among controls that are never greyed. It
+    // comes back on the next video that has subtitles — this runs every tick.
+    if (blockedWhy()) { if (existing) existing.remove(); return; }
+    if (existing) return;
     const btn = document.createElement('button');
     btn.className = 'ytp-button ytds-launch';
     // "Dual" is doing the work here: plain "subtitles" is the button standing
@@ -2563,6 +2620,7 @@
   // The first two shapes hold like/dislike and Share; the buttons YouTube folds
   // into "..." on a narrow window live in a different node, so appending here
   // cannot push one of them out of sight.
+  const CTA_TITLE = 'Dual subtitles — original + translation, for language study';
   const ACTION_ROWS = [
     'ytd-watch-metadata #top-level-buttons-computed',
     '#actions #top-level-buttons-computed',
@@ -2587,16 +2645,26 @@
     // one pill, in the row we would pick now. It also repairs itself: a pill
     // left in the outer row moves down as soon as the inner one shows up.
     const found = document.querySelectorAll('.ytds-cta');
-    if (found.length === 1 && found[0].parentNode === row) return;
-    for (const n of found) n.remove();
-    // The label says what the button opens rather than which language it is
-    // for: the original track can be any of them, and both modes behind this
-    // button show two languages at once. Why anyone would want that is the
-    // tooltip's job, where there is room to say it.
-    // It is its own element so a narrow window can drop it and leave a round
-    // icon button, the way the row's own buttons give up their words.
-    row.appendChild(mkBtn('ytds-cta', 'Dual subtitles — original + translation, for language study',
-      enterReader, icon('study'), el('span', 'ytds-cta-label', 'Dual subtitles')));
+    let pill = (found.length === 1 && found[0].parentNode === row) ? found[0] : null;
+    if (!pill) {
+      for (const n of found) n.remove();
+      // The label says what the button opens rather than which language it is
+      // for: the original track can be any of them, and both modes behind this
+      // button show two languages at once. Why anyone would want that is the
+      // tooltip's job, where there is room to say it.
+      // It is its own element so a narrow window can drop it and leave a round
+      // icon button, the way the row's own buttons give up their words.
+      pill = mkBtn('ytds-cta', CTA_TITLE,
+        enterReader, icon('study'), el('span', 'ytds-cta-label', 'Dual subtitles'));
+      row.appendChild(pill);
+    }
+    // Here the convention is the opposite of the player's: nothing in the row
+    // of Share / Save ever disappears, and a button that comes and goes reads
+    // as an extension that broke rather than as a video with nothing to read.
+    // So it stays put, goes quiet, and says why on hover.
+    const why = blockedWhy();
+    pill.disabled = !!why;
+    pill.title = why || CTA_TITLE;
   }
 
   // ---------- lifecycle ----------
@@ -2618,8 +2686,6 @@
       if (state.reader) applySpeed(); // a fresh element starts at 1×, whatever our menu says
     }
     ensurePanel();
-    ensureLaunchButton();
-    ensureActionButton();
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {
       currentVideoId = id;
@@ -2634,6 +2700,13 @@
       if (state.reader) applySpeed();
       loadCaptions();
     }
+    // After the block above, not before it: the buttons show what we know about
+    // THIS video, and loadCaptions resets that knowledge synchronously before
+    // its first await. Drawn earlier they would spend a tick answering for the
+    // video we just left — a pill greyed out on a video that does have
+    // subtitles, which is the one mistake this whole gate exists to avoid.
+    ensureLaunchButton();
+    ensureActionButton();
     // The player takes the rate back at moments that do not always announce
     // themselves with a ratechange event (a swapped element, an ad, a quality
     // switch). One comparison a second, and only while the overlay is open.

@@ -9,6 +9,16 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Changed
+
+- **Dual subtitles** no longer opens onto videos it has nothing to show. On a
+  video without subtitles the pill under the video goes quiet and says why on
+  hover, and the button in the player steps aside the way YouTube's own CC
+  button does. Live streams are treated the same until they end: their
+  subtitles have no finished timing to read against. The check costs nothing —
+  it asks the page which subtitle tracks exist, and never switches captions on
+  to find out.
+
 ### Fixed
 
 - The extension no longer switches YouTube's own captions on behind your back.

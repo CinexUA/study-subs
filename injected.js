@@ -286,7 +286,12 @@
         name: t.name?.simpleText || t.name?.runs?.[0]?.text || '',
         kind: t.kind || ''
       }));
-      window.postMessage({ type: 'YTDS_TRACKS', tracks }, '*');
+      // `isLive`, not `isLiveContent`: the second one stays true forever on the
+      // recording of a stream, and those are ordinary videos with an ordinary
+      // finished track. Only a stream that is live RIGHT NOW has no end for the
+      // timing model to hold on to.
+      const live = !!(pr?.videoDetails?.isLive);
+      window.postMessage({ type: 'YTDS_TRACKS', tracks, isLive: live }, '*');
     }
   });
 })();
