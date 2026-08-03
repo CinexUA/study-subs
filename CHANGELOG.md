@@ -7,26 +7,21 @@ in the commit that made it.
 `Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
 A bug introduced and fixed before a release is not listed: nobody ever had it.
 
-## Unreleased
+## 1.2.0 — 2026-08-03
 
-### Fixed
+### Added
 
-- Study mode no longer opens on `[applause]`. Sound cues — `[Music]`,
-  `[Applause]`, `(laughs)`, the `♪` between verses — are not speech, and they
-  were being counted as sentences: on one TED talk, sentence 1 of 129 was the
-  applause before the speaker said a word. They also pulled the translation out
-  of line, so a real phrase could appear glued to the end of them. They are now
-  left out of both languages, and the first sentence is the first thing anyone
-  actually says. Song lines keep their words — only the notes around them go.
-
-- Ads are no longer treated as part of the video you are studying. The reader
-  steps aside for the whole ad — the ad stays visible and its **Skip** button
-  stays clickable — and comes back on its own when the ad is over, replaying
-  the sentence the ad interrupted from its beginning. Along the way the ad
-  stops being paused by the sentence stop, stops being played at your study
-  speed, and its own subtitles can no longer end up saved as the video's.
-  Nothing here changes for YouTube Premium, which is why it went unnoticed
-  for so long.
+- **Point at a phrase to see the phrase that translates it.** Once study mode
+  has stopped on a sentence, moving the cursor over a phrase of the original
+  lights its counterpart in the translation and steps the rest of the
+  translation back. With the translation line switched off it is the only
+  thing that appears — standing in the place it holds in the line, which is
+  what says whether it is the start of the sentence or the end. The unit is a
+  phrase between commas and never a single word: pairing single words across
+  two languages needs a dictionary, and nothing here claims to know more than
+  the subtitles do. A sentence with nothing finer inside it — no commas of its
+  own, or a translation that carries none — answers with the whole line rather
+  than not answering at all.
 
 ### Changed
 
@@ -39,6 +34,27 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
   to find out.
 
 ### Fixed
+
+- Study mode no longer opens on `[applause]`. Sound cues — `[Music]`,
+  `[Applause]`, `(laughs)`, the `♪` between verses — are not speech, and they
+  were being counted as sentences: on one TED talk, sentence 1 of 129 was the
+  applause before the speaker said a word. They also pulled the translation out
+  of line, so a real phrase could appear glued to the end of them. They are now
+  left out of both languages, and the first sentence is the first thing anyone
+  actually says. Song lines keep their words — only the notes around them go.
+  The `>>` that transcripts put in front of a new speaker goes the same way:
+  it is a note about the transcript rather than a word anyone said, and on the
+  tracks that use it, it was the first thing on screen. Only where it opens a
+  line — `»` is a closing quote in half the languages this has to survive.
+
+- Ads are no longer treated as part of the video you are studying. The reader
+  steps aside for the whole ad — the ad stays visible and its **Skip** button
+  stays clickable — and comes back on its own when the ad is over, replaying
+  the sentence the ad interrupted from its beginning. Along the way the ad
+  stops being paused by the sentence stop, stops being played at your study
+  speed, and its own subtitles can no longer end up saved as the video's.
+  Nothing here changes for YouTube Premium, which is why it went unnoticed
+  for so long.
 
 - The extension no longer switches YouTube's own captions on behind your back.
   It used to do that on every video you opened, whether or not you ever opened
