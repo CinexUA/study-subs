@@ -370,6 +370,12 @@
   box-decoration-break: clone;
 }
 .ytds-pointable .ytds-chunk.ytds-lit { background-color: var(--bg-hover); }
+/* A sentence with nothing finer to say is one target, and then the source side
+   gets no background: it would wash a whole two-line sentence to mark the very
+   thing the cursor is already on, which says nothing. The answer side keeps
+   its mark — that is the half that carries the information, and with the
+   translation off it is the only thing on screen. */
+.ytds-one-target .ytds-zone-en .ytds-chunk.ytds-lit { background-color: transparent; }
 /* Only the translation steps back, never the source. The English line is the
    one being read; dimming four fifths of it every time the cursor crosses it
    would fight the reading instead of helping it. */

@@ -1092,12 +1092,25 @@
     return chunks.map((ws) => ({ start: 0, units: ws, full: ws.map((w) => w.text).join(' ') }));
   }
 
-  // Targets of one sentence, or null when there is nothing finer to say (no
-  // internal punctuation on one of the two sides) — then pointing lights the
-  // whole line, which is what it did before this existed.
+  // When there is nothing finer to say, the sentence is one target: pointing
+  // anywhere in it lights the whole translation. Which is worth having rather
+  // than falling silent — with the UK chip off it is the only way to see the
+  // line at all, and silence reads as a broken feature rather than as an
+  // honest "no finer answer exists". A sentence gets here whenever EITHER side
+  // lacks internal punctuation, and the translation is the common case: "In
+  // 2014, my beautiful wife, Sandra, and I were expecting our first child."
+  // carries four phrases, "У 2014 році ми з моєю прекрасною дружиною Сандрою
+  // чекали на нашу першу дитину." carries none, and the gate is min(EN, UA).
+  function wholeAsOne(enText, uaText) {
+    const zeros = (s) => s.split(/\s+/).filter(Boolean).map(() => 0);
+    return { count: 1, enOf: zeros(enText), uaOf: zeros(uaText) };
+  }
+
+  // Targets of one sentence: the phrases it can be pointed at, in word-index
+  // form for each side.
   function buildChunkPairs(enText, uaText) {
     const enC = splitIntoChunks(enText), uaC = splitIntoChunks(uaText);
-    if (enC.length < 2 || uaC.length < 2) return null;
+    if (enC.length < 2 || uaC.length < 2) return wholeAsOne(enText, uaText);
     const buckets = alignSentences(uaC, enC);   // one bucket per English phrase
 
     // Pointing must never answer with nothing, so a phrase the aligner left
@@ -1114,7 +1127,7 @@
       groups[1].en = groups[0].en.concat(groups[1].en);
       groups.shift();
     }
-    if (groups.length < 2) return null;
+    if (groups.length < 2) return wholeAsOne(enText, uaText);
 
     // Word index -> target, for both sides, which is all the renderer needs: it
     // walks its own words and asks which target each of them belongs to.
@@ -2088,7 +2101,11 @@
       ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf }] : []);
     elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
     elStage.classList.toggle('ytds-pointable', !!pairs);
-    if (pairs) hintOnce();
+    elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
+    // Only where there is a CHOICE of phrases: on a sentence that is one
+    // target the line says "point at a phrase" and there is only the whole of
+    // it to point at, which teaches the wrong thing on first sight.
+    if (pairs && pairs.count > 1) hintOnce();
   }
 
   function renderLines(en, ua, fresh) {
