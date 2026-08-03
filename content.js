@@ -98,7 +98,10 @@
   let availability = 'unknown';   // unknown | ready | none | live
   const WHY_BLOCKED = {
     none: 'This video has no subtitles — nothing to read here',
-    live: 'Live streams have no finished subtitles yet — try the recording afterwards'
+    live: 'Live streams have no finished subtitles yet — try the recording afterwards',
+    // Formally there are subtitles here, so "no subtitles" would read as a
+    // broken extension rather than as a video with nothing to say.
+    cues: 'These subtitles are only sound cues like [Music] — nothing to read here'
   };
   const blockedWhy = () => WHY_BLOCKED[availability] || '';
   // Live wins over everything: a stream can carry a caption track and still be
@@ -1500,10 +1503,70 @@
     return one > units.length * 0.6;
   }
 
+  // ---------- sound cues ----------
+  // Tracks carry lines nobody says out loud: [applause], [Music], (laughs), a
+  // bare ♪ between verses. They are not material to shadow, and until now they
+  // were sentences like any other — on the TED talk that prompted this,
+  // SENTENCE 1 / 129 was "[applause]", and the aligner then had to find it a
+  // partner in the translation and dragged the start of a real phrase along
+  // with it (measured from two screenshots, 2026-08-03).
+  //
+  // The test is structural and never a word list: the source track can be in
+  // any language, and `applause, music, laughter` would miss [Музика] and [拍手]
+  // on the first foreign video. Brackets mean the same thing in all of them.
+  const CUE_SQUARE_RE = /\[[^\]]*\]/g;
+  const CUE_NOTES_RE = /[♪♫]/g;
+  // Round brackets are the careful half, and the only place this can eat real
+  // speech. Square ones are YouTube's own convention for non-speech and never
+  // hold spoken words, so they come out wherever they sit — including a long
+  // [upbeat instrumental music playing]. Round ones do appear inside speech —
+  // "I went there (in 2014) and…" — so they count only when they are the WHOLE
+  // unit and hold at most two words: (laughs) and (upbeat music) go, a spoken
+  // "(and I mean it)" stays.
+  const CUE_ROUND_ONLY_RE = /^\s*\(([^)]*)\)\s*$/;
+  const CUE_ROUND_MAX_WORDS = 2;
+
+  function stripCues(text) {
+    const s = String(text == null ? '' : text);
+    const round = CUE_ROUND_ONLY_RE.exec(s);
+    if (round && round[1].trim().split(/\s+/).filter(Boolean).length <= CUE_ROUND_MAX_WORDS) return '';
+    return s.replace(CUE_SQUARE_RE, ' ').replace(CUE_NOTES_RE, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // Units keep their identity — only the text changes — so the timing model
+  // sees what it always saw, minus the lines that were never speech. Dropping a
+  // unit only ever WIDENS the silence around it, and the rule that reads
+  // silence (a gap of 1.4 s closes a sentence) is safe in that direction.
+  // `textLen` is the emptiness test because it already counts letters and
+  // digits in any script: /[^\p{L}\p{N}']/gu.
+  function dropCues(units) {
+    const out = [];
+    for (const u of units) {
+      const text = stripCues(u.text);
+      if (!textLen(text)) continue;
+      out.push(text === u.text ? u : { ...u, text });
+    }
+    return out;
+  }
+
   function finishBuild(enRaw, uaRaw, sameLang, gen) {
     if (gen !== loadGen) { dbg('build finished after a newer load began — dropping it'); return true; }
-    const enUnits = splitUnitsByPunct(enRaw);
-    const uaUnits = sameLang ? enUnits : splitUnitsByPunct(uaRaw);
+    // Before the split, so that nothing downstream — sentences, lines, the
+    // aligner — ever sees a cue. This is the one place both paths meet, cached
+    // and fetched, which is also why the cache never needs clearing for it:
+    // what sits on disk stays raw and is filtered on every build.
+    const enClean = dropCues(enRaw);
+    // Logged even when it is zero: otherwise "the filter found nothing" and
+    // "the filter never ran" look identical, and only one of them is fine.
+    dbg(`sound cues: ${enRaw.length - enClean.length} of ${enRaw.length} units filtered out`);
+    if (!enClean.length) {
+      availability = 'cues';
+      dbg('every unit on this track is a sound cue — nothing to read here');
+      setStatus('these subtitles are only sound cues');
+      return true;
+    }
+    const enUnits = splitUnitsByPunct(enClean);
+    const uaUnits = sameLang ? enUnits : splitUnitsByPunct(dropCues(uaRaw));
     wordLevel = wordLevelTrack(enUnits);
 
     // Sentences first: the translation is aligned to them, and the lines then

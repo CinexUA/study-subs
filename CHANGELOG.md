@@ -11,6 +11,14 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- Study mode no longer opens on `[applause]`. Sound cues — `[Music]`,
+  `[Applause]`, `(laughs)`, the `♪` between verses — are not speech, and they
+  were being counted as sentences: on one TED talk, sentence 1 of 129 was the
+  applause before the speaker said a word. They also pulled the translation out
+  of line, so a real phrase could appear glued to the end of them. They are now
+  left out of both languages, and the first sentence is the first thing anyone
+  actually says. Song lines keep their words — only the notes around them go.
+
 - Ads are no longer treated as part of the video you are studying. The reader
   steps aside for the whole ad — the ad stays visible and its **Skip** button
   stays clickable — and comes back on its own when the ad is over, replaying
