@@ -7,6 +7,19 @@ in the commit that made it.
 `Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
 A bug introduced and fixed before a release is not listed: nobody ever had it.
 
+## Unreleased
+
+### Fixed
+
+- The extension no longer switches YouTube's own captions on behind your back.
+  It used to do that on every video you opened, whether or not you ever opened
+  the reader — and since YouTube remembers that setting, one video was enough
+  to leave CC turned on across your whole feed, for good. The player is now
+  only ever touched while the reader is open, and its captions are put back the
+  way they were when the subtitles have been loaded. Watching normally is
+  untouched again. If yours are still stuck on from an earlier version, switch
+  CC off once in the player and they will stay off.
+
 ## 1.1.1 — 2026-08-02
 
 ### Added

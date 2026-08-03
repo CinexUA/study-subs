@@ -40,16 +40,105 @@
 
   // ---- turn captions on so the player fetches them ----
   let enableToken = 0;
+  // Where the player's CC stood before we touched them, so the end of a cycle
+  // can put them back. `undefined` means we never got to establish it, and then
+  // restoring is not ours to do. This exists because switching CC on is not a
+  // local act: YouTube remembers it for every later video and for the next
+  // session, and until 2026-08-03 nothing here ever switched them off again —
+  // one video was enough to leave a user with captions on their whole feed.
+  let ccWas;
+  let reonTimer = null;  // the pending "…and back on" half of a retoggle
+  let lastTrack = null;  // the track we selected, for restoring CC on via the API
+  // Where "captions stay on from here" actually lives — measured 2026-08-03,
+  // and it is the reason this bug outlived a page reload: the CC button is a
+  // view of this key, not the thing itself. Clicking the button writes it in
+  // both directions, so restoring the button normally restores this too; the
+  // raw value is kept only to cover the paths that have no button to click.
+  const PERSIST_KEY = 'yt-player-caption-persistence';
+  let ccWasPersist;      // its exact value before we touched anything
+
+  const player = () => document.getElementById('movie_player');
   // Looked up INSIDE #movie_player, for the same reason the play button is:
   // sidebar and inline preview players carry the same class, and a blind
   // document-wide query can press the wrong one — which looks exactly like a
   // dead button. Only a page with no #movie_player at all falls back.
   const ccBtn = () => {
-    const p = document.getElementById('movie_player');
+    const p = player();
     return p ? p.querySelector('.ytp-subtitles-button')
              : document.querySelector('.ytp-subtitles-button');
   };
   const ccIsOn = (b) => !!b && b.getAttribute('aria-pressed') === 'true';
+
+  // true / false, or null when neither witness can answer yet. The button is
+  // the honest one; the API is asked only because the button does not exist
+  // until the controls are built, and we can be here before that.
+  function ccStateNow() {
+    const b = ccBtn();
+    if (b && b.hasAttribute('aria-pressed')) return ccIsOn(b);
+    try {
+      const p = player();
+      const t = p && p.getOption && p.getOption('captions', 'track');
+      if (t) return !!(t.languageCode || t.vssId || t.vss_id || t.name);
+    } catch (_) {}
+    return null;
+  }
+
+  // Called right before the first thing we change, not when the request comes
+  // in: a page that is still building has nothing to report, and a guess there
+  // would be the one recorded for the whole cycle.
+  function rememberCc() {
+    if (ccWas !== undefined) return;
+    const now = ccStateNow();
+    if (now === null) return;
+    ccWas = now;
+    try { ccWasPersist = localStorage.getItem(PERSIST_KEY); } catch (_) {}
+  }
+
+  // The backstop for the key above. Written back verbatim — the value is one
+  // YouTube itself put there, not a shape we invented — and only when it has
+  // actually drifted, which after a button click it will not have.
+  function restorePersistence() {
+    if (ccWasPersist === undefined) return;
+    const was = ccWasPersist;
+    ccWasPersist = undefined;
+    try {
+      if (localStorage.getItem(PERSIST_KEY) === was) return;
+      if (was === null) localStorage.removeItem(PERSIST_KEY);
+      else localStorage.setItem(PERSIST_KEY, was);
+      log('restored YouTube\'s caption-persistence flag');
+    } catch (_) {}
+  }
+
+  // Put CC back where we found them. Both directions matter: off for someone
+  // who was not using them, and on for someone who was — a capture landing in
+  // the middle of a retoggle must not be what leaves their captions off.
+  function restoreCc() {
+    clearTimeout(reonTimer); reonTimer = null;
+    if (ccWas === undefined) { ccWasPersist = undefined; return; }
+    const want = ccWas;
+    ccWas = undefined;
+    if (ccStateNow() !== want) {
+      const btn = ccBtn();
+      if (btn) {
+        btn.click();
+        log(`restored CC ${want ? 'on' : 'off'}`);
+      // No button: the same API move the retoggle falls back to. Switching ON
+      // needs a track to select, and without one `{}` would mean the opposite
+      // of what we were asked — better to leave the player alone than invert it.
+      } else if (!want || lastTrack) {
+        try {
+          const p = player();
+          if (p && p.setOption) {
+            p.setOption('captions', 'track', want ? lastTrack : {});
+            log(`restored CC ${want ? 'on' : 'off'} via the API`);
+          }
+        } catch (_) {}
+      }
+    }
+    // After YouTube has had its own moment to write the key (measured: it lands
+    // well inside a second of the click).
+    setTimeout(restorePersistence, 800);
+  }
 
   // Turn captions off and back on again, the way a user pokes CC twice. Split
   // out because this is the ONLY move that makes the player build a fresh
@@ -60,8 +149,11 @@
       btn.click();
       // Switch it back on unconditionally — we are the ones who turned it off,
       // so a capture landing inside these 500 ms (which stops the loop) must
-      // not leave the user with captions off.
-      setTimeout(() => {
+      // not leave the user with captions off. Held in a handle so restoreCc,
+      // which runs at exactly that moment, has the last word instead of being
+      // undone half a second later.
+      clearTimeout(reonTimer);
+      reonTimer = setTimeout(() => {
         const b = ccBtn();
         if (b && !ccIsOn(b)) b.click();
       }, 500);
@@ -71,7 +163,8 @@
     // track object is how the player's own API turns captions off.
     if (api && track) {
       api.setOption('captions', 'track', {});
-      setTimeout(() => { try { api.setOption('captions', 'track', track); } catch (_) {} }, 300);
+      clearTimeout(reonTimer);
+      reonTimer = setTimeout(() => { try { api.setOption('captions', 'track', track); } catch (_) {} }, 300);
       return ' | re-toggled CC off→on via the API';
     }
     return '';
@@ -81,14 +174,17 @@
     if (token !== enableToken) return; // superseded or stopped
     let ok = false, info = '';
     try {
-      const p = document.getElementById('movie_player');
+      const p = player();
       const api = (p && p.loadModule && p.getOption && p.setOption) ? p : null;
       if (api) try { api.loadModule('captions'); } catch (_) {}
       const list = api ? (api.getOption('captions', 'tracklist') || []) : [];
       const track = list.length
         ? (list.find((t) => (t.languageCode || '').startsWith('en')) || list[0])
         : null;
+      if (track) lastTrack = track;
       info = api ? 'tracklist=' + list.length : 'player API not ready';
+      // Last moment before anything of the player's changes.
+      rememberCc();
 
       // Round 0 is the gentle one: select a track (which turns captions on if
       // they were off) or press CC. It is invisible, and when the player simply
@@ -175,6 +271,7 @@
 
     if (e.data.type === 'YTDS_STOP_ENABLE') {
       enableToken++; // invalidate any running retry loop
+      restoreCc();   // and leave the player's CC as we found them
       return;
     }
 

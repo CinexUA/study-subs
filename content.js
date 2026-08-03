@@ -86,6 +86,10 @@
   let currentVideoId = null;
   let throttledUntil = 0;    // HTTP 429: when we may ask for a translation again
   let awaitingCapture = false;
+  // The silent half of loadCaptions ran and came up empty, so this video still
+  // needs the player switched on — and that waits for the overlay. See the tail
+  // of loadCaptions for why.
+  let pokePending = false;
   let captureTimer = null;
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let captureRetries = 0, sawTracks = false;
@@ -1476,7 +1480,7 @@
     // the same length with the same sentence count would never redraw them.
     ticksDur = 0; ticksLen = -1;
     clearTimeout(stopTimer); stopTimer = null;
-    awaitingCapture = false;
+    awaitingCapture = false; pokePending = false;
     captureRetries = 0; sawTracks = false;
     clearTimeout(captureTimer);
     clearDisplay();
@@ -1502,17 +1506,45 @@
       dbg('direct fetch returned 0 → need interception');
     }
 
+    // Everything above this line is silent: it reads our own cache, fetches a
+    // url the page already handed us, or listens in on a request the player was
+    // making anyway. What is left is the loud part — switching the player's CC
+    // on — and that is not a local act: YouTube remembers it for every video
+    // after this one, and for the next session too. Running it on every watch
+    // page meant installing the extension turned captions on for good, whether
+    // or not the reader was ever opened (reported 2026-08-03: CC come on by
+    // themselves now, and they are in the way). So it waits for the overlay,
+    // the one moment captions are actually wanted. Interception stays armed
+    // either way — that part costs the player nothing: a
+    // user who has CC on for their own reasons is captured for free.
+    if (!state.reader) {
+      pokePending = true;
+      dbg('captions need the player switched on — holding off until the reader is opened');
+      setStatus('open the reader to load captions');
+      return;
+    }
+    pokePlayer();
+  }
+
+  // The loud half of loadCaptions, split out so enterReader can run it on its
+  // own — by then the silent half has already had its turn for this video.
+  function pokePlayer() {
+    pokePending = false;
     awaitingCapture = true;
     setStatus('enabling player captions…');
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
+    clearTimeout(captureTimer);
     captureTimer = setTimeout(() => {
       if (!awaitingCapture || captionsReady) return;
       awaitingCapture = false;
       window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
       if (sawTracks) {
         dbg('gave up: the player never returned usable captions for this track');
-        setStatus('the player returned no captions — switch CC off and on in the player, or reload the page');
+        // Not "switch CC off and on" any more: giving up restores the player's
+        // captions to whatever they were before we asked, so half that
+        // instruction can now be the half that does nothing.
+        setStatus('the player returned no captions — try toggling CC in the player, or reload the page');
       } else {
         dbg('gave up: no caption tracks at all — the video likely has none');
         setStatus('this video has no YouTube captions');
@@ -2408,6 +2440,11 @@
     wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
+    // The load for this video stopped short of the player on purpose (see the
+    // tail of loadCaptions): opening the overlay is the permission it waited
+    // for. Not while a capture is already in flight, and not once we have the
+    // captions anyway — the player may well have been switched on by its owner.
+    if (pokePending && !captionsReady && !awaitingCapture) pokePlayer();
     offerResume();  // captions may have been ready long before the overlay
     startLoop();
     saveState();    // last: by now nothing it does can keep the overlay shut
@@ -2420,6 +2457,17 @@
     // with whatever position YouTube happened to restore.
     if (markMoved) saveMark();
     hideResume();
+    // Closing the overlay withdraws the permission that started the enable loop
+    // (see the tail of loadCaptions). Left running it would go on poking the
+    // player for another twenty seconds after the feature was put away — and
+    // the CC it switched on would have nothing to switch them off again.
+    if (awaitingCapture) {
+      awaitingCapture = false;
+      clearTimeout(captureTimer);
+      pokePending = true;   // reopening the overlay is what may ask again
+      window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
+      dbg('reader closed mid-capture — stopped asking the player');
+    }
     state.reader = false; saveState();
     stopLoop();
     stopAt = null; // let the video play normally again outside study mode
