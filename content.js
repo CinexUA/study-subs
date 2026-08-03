@@ -2693,7 +2693,17 @@
     closeDrawer();
     document.body.appendChild(panel);
     document.documentElement.classList.add('ytds-reader');
-    if (panel.requestFullscreen) panel.requestFullscreen().catch(() => {});
+    // The PAGE goes fullscreen, not our panel — and the difference only shows
+    // during an ad. With the panel as the fullscreen element, hiding it did
+    // reveal the page underneath (a transparent ::backdrop is enough for that,
+    // confirmed on a real ad 2026-08-03) but left it dead to the pointer: in
+    // fullscreen only the fullscreen element takes clicks, so Skip Ad could be
+    // seen and not pressed. With the page as the fullscreen element the player
+    // sits INSIDE it, so hiding our panel gives back both the picture and the
+    // clicks. Our panel is fixed/inset:0 either way, so the reader looks the
+    // same; nothing here depends on which element the browser is showing.
+    const fsHost = document.documentElement;
+    if (fsHost.requestFullscreen) fsHost.requestFullscreen().catch(() => {});
     syncUi();
     // Opening the reader in the middle of an ad passes no edge, so pumpAd()
     // would never put the panel aside — it would come back on top of the spot.
@@ -2747,7 +2757,10 @@
     if (panel) panel.classList.remove('ytds-ad');
     adResumePending = false;
     document.documentElement.classList.remove('ytds-reader');
-    if (document.fullscreenElement === panel) document.exitFullscreen().catch(() => {});
+    // Ours is now the page, not the panel (see enterReader). Still a comparison
+    // rather than a blind exit: the user may have put the player into ITS own
+    // fullscreen, and that one is not ours to close.
+    if (document.fullscreenElement === document.documentElement) document.exitFullscreen().catch(() => {});
     if (panel && panel.parentElement) panel.parentElement.removeChild(panel);
     syncUi();
   }
