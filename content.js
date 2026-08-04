@@ -750,9 +750,21 @@
     // text is the better witness.
     const est = u.t + estSpeechDur(u.text);
     const ridesNext = u.end == null || u.end >= next.t - 0.05;
-    // Trusted: today's value, except a multi-word unit may outlive the
-    // single-word cap baked into spokenEnd — a whole line is meant to be long.
-    const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, Math.min(u.end, est));
+    // Trusted: the end the track gives, as it stands. It used to be capped by
+    // the estimate as well (`Math.min(u.end, est)`), which undid the very thing
+    // this branch establishes — that `u.end` is a real recorded end, because it
+    // stops short of the next onset. A speaker slower than 75 ms per letter
+    // then lost the difference off the end of every sentence.
+    //   Measured on yhGzXULZkEw, sentence 44 (2026-08-04):
+    //   "…and then I translated it into code." — line 270.36 → 276.08, next
+    //   sentence 276.68. est said 274.41, so the stop fell 1.29 s inside the
+    //   last word ("transle…") with 1.89 s of silence going spare after it.
+    //   Across that track: 86 sentences cut by >0.3 s → 16, and on f_N3PGvnVKg
+    //   49 → 0, with the sentence count unchanged on both (203 and 95).
+    // The cap stays where it earns its keep: spokenEnd, which also feeds the
+    // silence-based sentence break — capping there is what keeps segmentation
+    // identical, and moving it moved 203 sentences to 190.
+    const spoken = ridesNext ? Math.min(est, next.t) : Math.max(se, u.end);
     // The tail applies to BOTH branches. It first shipped tunable only on the
     // estimate branch, on the argument that after a real recorded end 200 ms is
     // enough by construction. Measurement killed that argument: the sentence
