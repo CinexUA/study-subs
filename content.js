@@ -6,7 +6,7 @@
   'use strict';
 
   const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, tailMs: 300 };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300 };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -18,7 +18,11 @@
   // element write and the ratechange guard (see applySpeed).
   const SPEEDS = [0.5, 0.6, 0.7, 0.8, 0.9, 1, 1.25, 1.5, 2];
   // Subtitle scale steps from the design language (26/32/40/50/62px → ×M).
-  const FONT_STEPS = [['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
+  // Two steps below the old floor. XS was sized for the reader, where the text
+  // IS the screen; over video the same size covers the picture it is supposed
+  // to caption. The existing five keep their values, so a saved scale still
+  // means what it meant (fontStepIdx snaps to the nearest step anyway).
+  const FONT_STEPS = [['MIN', 0.4], ['XXS', 0.52], ['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
   // How long study mode keeps playing past the point where the last word is
   // ESTIMATED to end — see sentenceStop. Typed in, not picked from a ladder:
   // the right value is a property of the speaker, and finding it is a matter
@@ -69,7 +73,13 @@
     eye: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/></svg>',
     eyeOff: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/><path d="M4.6 15.4 15.4 4.6"/></svg>',
     // The place we kept for you: shown on the button that returns to it.
-    bookmark: S + '<path d="M5.6 3.6h8.8v12.8L10 12.9l-4.4 3.5Z"/></svg>'
+    bookmark: S + '<path d="M5.6 3.6h8.8v12.8L10 12.9l-4.4 3.5Z"/></svg>',
+    // The transcript panel. Lines of text rather than the cog's line-and-knob:
+    // the last one is short, which is what makes a paragraph read as a
+    // paragraph and not as a list of settings.
+    list: S + '<path d="M4.4 6.2h11.2M4.4 10h11.2M4.4 13.8h7"/></svg>',
+    // Video mode: the picture comes back, and the text sits on it.
+    screen: S + '<rect x="3" y="4.4" width="14" height="9.6" rx="2.2"/><path d="M7.4 16.8h5.2"/></svg>'
   };
 
   let state = { ...DEFAULTS };
@@ -114,7 +124,21 @@
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
   let btnTailReset, inpTail;
-  let btnStudy, btnFocus;
+  let btnStudy, btnFocus, btnTranscript, btnVideo;
+  // Video mode borrows the player's geometry and must give it back exactly.
+  // null = we have not taken it; a string (possibly empty) = what was there.
+  let playerStyleWas = null;
+  // The transcript panel: every sentence of the video, listed. The list is DOM,
+  // not state — it is born in finishBuild and dies in loadCaptions, so it can
+  // never disagree with the stage about what a sentence is.
+  let elAside, elList, elFollow;
+  let listBuilt = false;    // this video's sentences are already in the list
+  let listIdx = -1;         // which block currently wears the active class
+  // Following is an intent for this sitting, like sentenceDone — never saved.
+  let following = true;
+  // Our own scrollTop write also fires `scroll`, and reading that as the user
+  // taking over would switch following off on the very first sentence.
+  let selfScrollAt = 0;
   let awakeTimer = null, hintTimer = null, copyTimer = null, reloadTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
   let sleepPt = null;         // where it was when the interface hid
@@ -276,6 +300,8 @@
   const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
   const clearDisplay = () => {
     if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
+    if (elList) elList.textContent = '';
+    listBuilt = false; listIdx = -1; following = true;
     lastSig = null; lastIdx = -1;
   };
   const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -1708,7 +1734,8 @@
     lastSig = null; lastIdx = -1;
     dbg(`ready: source ${enUnits.length} units / ${enLines.length} lines · ${sentences.length} sentences · ` +
         `${state.targetLang.toUpperCase()} ${uaUnits.length} units / ${uaSents.length} sentences · ` +
-        `${wordLevel ? 'word-level track: reveal word by word' : 'line-level track: whole sentence at once'}`);
+        `${wordLevel ? 'word-level track: reveal word by word (recorded onsets)'
+                     : 'line-level track: reveal word by word (interpolated, visual only)'}`);
     if (!sameLang) {
       const blank = uaSentences.reduce((k, s) => k + (s.units.length ? 0 : 1), 0);
       if (blank) dbg(`alignment: ${blank} of ${sentences.length} sentences got no translation`);
@@ -1717,6 +1744,11 @@
     markAvailable();   // subtitles in hand is the last word on whether any exist
     updateStatus();
     renderKeys();   // study mode only owns the keys once there are sentences
+    // The transcript is born here for the same reason the stage is: this is the
+    // one place both paths meet, cached and fetched, so the list cannot end up
+    // disagreeing with the stage about what a sentence is.
+    listBuilt = false; listIdx = -1;
+    ensureTranscript();
     if (state.reader && state.study) armStudy();
     offerResume();  // the first moment sentences exist for this video
     return true;
@@ -2034,12 +2066,17 @@
       // `paused` is in the signature because stopping is what turns the
       // sentence into pointable phrases: without it the frame that stops looks
       // identical to the one before and the gate would eat the repaint.
-      const sig = `S${sentIdx}:${enN}:${uaN}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
+      // The soft counts belong in the signature: on a line-level track enN
+      // never moves, so without them the gate would eat every repaint and the
+      // sentence would sit there fully lit from its first frame.
+      const enW = softCount(enS, t);
+      const uaW = softCountUa(enS, uaS, t);
+      const sig = `S${sentIdx}:${enN}:${uaN}:${enW}:${uaW}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
       if (sig === lastSig) return;
       const fresh = sentIdx !== lastIdx;
       lastSig = sig; lastIdx = sentIdx;
-      renderStudy(enS, uaS, enN, uaN, fresh);
-      if (fresh) updateCounter();
+      renderStudy(enS, uaS, enN, uaN, fresh, enW, uaW);
+      if (fresh) { updateCounter(); syncTranscript(); }
       return;
     }
 
@@ -2057,7 +2094,7 @@
     renderLines(en, ua, fresh);
     // Keep the counter (and the sentence the shadowing row would resume from)
     // honest even while we are not driving playback.
-    if (fresh && sentences.length) { sentIdx = findSentenceAt(t); updateCounter(); }
+    if (fresh && sentences.length) { sentIdx = findSentenceAt(t); updateCounter(); syncTranscript(); }
   }
 
   // How many EN words of a sentence should be visible at time t.
@@ -2093,6 +2130,54 @@
     return Math.max(1, Math.ceil(p * uaS.units.length));
   }
 
+  // ---------- the soft reveal (line-level tracks only) ----------
+  //
+  // On a line-level track a unit is a whole caption line, so there are no word
+  // times to walk — the reveal above hands back the entire sentence at once.
+  // This puts the typing back, and it is honest about being VISUAL: the words
+  // are placed by interpolating the sentence's own span across its characters,
+  // not by any time YouTube recorded.
+  //
+  // What makes it safe is that it never changes the TEXT that is on screen. The
+  // sentence is drawn whole from the first frame and the unspoken tail is only
+  // made transparent, so the layout is settled before the first word appears —
+  // which is precisely the fault that killed the previous attempt (2026-08-02:
+  // half a sentence arriving at once and taking the line breaks with it).
+  // Nothing here touches `stop`, segmentation or the alignment: they all still
+  // work in units, and this counts words for the eye alone.
+  function sentText(s) {
+    if (s._text == null) s._text = joinUnits(s.units);
+    return s._text;
+  }
+
+  function sentenceFrac(s, t) {
+    if (!s) return 0;
+    // Against `stop`, like the translation reveal: the last word then lands
+    // exactly as playback pauses, instead of a beat after it.
+    const span = ((s.stop != null ? s.stop : s.end) - s.start) || 1;
+    return clamp((t + LEAD - s.start) / span, 0, 1);
+  }
+
+  // By characters rather than by word count, so "extraordinarily" is given more
+  // of the sentence than "in" — the same way splitUnitsByPunct spreads a line.
+  function wordsShown(text, frac) {
+    const words = String(text).trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return 0;
+    if (frac >= 1) return words.length;
+    if (frac <= 0) return 0;
+    const total = text.replace(/\s+/g, '').length || 1;
+    let acc = 0, n = 0;
+    for (const w of words) { acc += w.length; n++; if (acc / total >= frac) break; }
+    return n;
+  }
+
+  // −1 means "not applicable": a word-level track reveals by real onsets, and
+  // the value also sits in the frame signature, where −1 keeps it constant.
+  function softCount(s, t) { return !s || wordLevel ? -1 : wordsShown(sentText(s), sentenceFrac(s, t)); }
+  function softCountUa(enS, uaS, t) {
+    return !uaS || !enS || wordLevel ? -1 : wordsShown(sentText(uaS), sentenceFrac(enS, t));
+  }
+
   // Pointing at a phrase needs the sentence in pieces, and it is only offered
   // while playback is stopped ON A WHOLE sentence. Two reasons, and the second
   // is the real one: a pairing computed against half a sentence is a DIFFERENT
@@ -2105,20 +2190,23 @@
 
   // Two fixed zones split by the hairline: EN sits just ABOVE it (grows
   // upward, its baseline never moves), the translation just below.
-  function renderStudy(enS, uaS, enN, uaN, fresh) {
+  function renderStudy(enS, uaS, enN, uaN, fresh, enW, uaW) {
     if (!elZoneEn) return;
     hideNote();
     const pairs = pointable(enS, enN) ? chunkPairs(sentIdx) : null;
+    // On a line-level track the slice is the whole sentence anyway; the soft
+    // count then decides how much of it is visible. Phrases win when they are
+    // offered — by then playback has stopped and every word is out.
     const enWords = enS ? joinUnits(enS.units.slice(0, enN)) : '';
     const uaWords = uaS ? joinUnits(uaS.units.slice(0, uaN)) : '';
     paint(elZoneEn, 'ytds-en', state.showEn && enS
-      ? [{ text: enWords, fresh, chunks: pairs && pairs.enOf }] : []);
+      ? [{ text: enWords, fresh, chunks: pairs && pairs.enOf, words: pairs ? -1 : enW }] : []);
     // The translation zone is painted even with the UK chip off, hidden by
     // class rather than left empty: that is what lets one phrase appear on
     // demand, and appear in the PLACE it holds in the line. Hover then only
     // ever toggles classes — it can never reach the render loop.
     paint(elZoneUa, 'ytds-ua', (state.showUa || pairs) && uaS
-      ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf }] : []);
+      ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf, words: pairs ? -1 : uaW }] : []);
     elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
     elStage.classList.toggle('ytds-pointable', !!pairs);
     elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
@@ -2170,6 +2258,17 @@
     }
   }
 
+  // One span per word, the whole sentence every time. What changes between
+  // frames is which spans are lit — the line breaks are settled from the first
+  // frame, so nothing below the text can move as the speaker talks.
+  function wordSpans(line, text, shown) {
+    const words = String(text).trim().split(/\s+/).filter(Boolean);
+    words.forEach((w, i) => {
+      line.appendChild(el('span', 'ytds-word' + (i < shown ? '' : ' ytds-unsaid'), w));
+      if (i + 1 < words.length) line.appendChild(document.createTextNode(' '));
+    });
+  }
+
   // `fresh` only on a new line/sentence: the node is rebuilt on every word, so
   // carrying the class over would replay the entrance animation each time.
   function paint(zone, cls, items) {
@@ -2184,6 +2283,13 @@
       if (it.chunks) {
         const line = el('span', 'ytds-line ' + cls);
         chunkSpans(line, it.text, it.chunks);
+        block.appendChild(line);
+        zone.appendChild(block);
+        continue;
+      }
+      if (it.words != null && it.words >= 0) {
+        const line = el('span', 'ytds-line ' + cls);
+        wordSpans(line, it.text, it.words);
         block.appendChild(line);
         zone.appendChild(block);
         continue;
@@ -2371,7 +2477,12 @@
     panel.addEventListener('mousemove', (e) => { ptr = { x: e.clientX, y: e.clientY }; wake(e); });
     panel.addEventListener('click', wake);
     elHint = el('div', 'ytds-hint');
-    panel.append(buildTop(), buildStage(), buildStudyRow(), buildControls(), buildDrawer(),
+    // The stage and the transcript share one row, so opening the list narrows
+    // the stage instead of covering it — that is the whole difference between
+    // this and the settings drawer, which floats above everything.
+    const body = el('div', 'ytds-body');
+    body.append(buildStage(), buildAside());
+    panel.append(buildTop(), body, buildStudyRow(), buildControls(), buildDrawer(),
                  buildSimExit(), elHint);
     syncUi();
     return true;
@@ -2391,10 +2502,19 @@
       () => setStudy(!state.study), icon('study'), el('span', null, 'Study'));
     btnStudy.dataset.key = 'study';
 
-    const left = el('div', 'ytds-top-side');
-    left.append(segLang, mkLangMenu(), mkFontSeg(), btnStudy);
+    btnVideo = mkBtn('ytds-pill ytds-pill-text', 'Video mode: keep the picture, with the text over it',
+      () => toggleKey('videoMode'), icon('screen'), el('span', null, 'Video'));
+    btnVideo.dataset.key = 'videoMode';
 
-    elCounter = el('div', 'ytds-counter');
+    // A named pill beside the other two modes, not an unlabelled icon among the
+    // themes and the gear: it turns a whole column of the screen on and off, and
+    // as an icon it was not read as the thing that does that.
+    btnTranscript = mkBtn('ytds-pill ytds-pill-text', 'Transcript: every sentence of this video',
+      () => toggleKey('transcript'), icon('list'), el('span', null, 'Transcript'));
+    btnTranscript.dataset.key = 'transcript';
+
+    const left = el('div', 'ytds-top-side');
+    left.append(segLang, mkLangMenu(), mkFontSeg(), btnStudy, btnVideo, btnTranscript);
 
     btnFocus = mkBtn('ytds-icon ytds-focus-btn', 'Focus mode: hide everything but the text (move the mouse to bring it back)',
       () => { toggleKey('focus'); if (state.focus) showHint('Move the mouse to bring the controls back'); }, icon('eye'));
@@ -2409,7 +2529,7 @@
     );
 
     const top = el('div', 'ytds-top');
-    top.append(left, elCounter, right);
+    top.append(left, right);
     return top;
   }
 
@@ -2461,6 +2581,154 @@
     showHint('Point at a phrase to see its translation');
   }
 
+  // ---------- transcript panel ----------
+
+  // Every sentence of the video, listed beside the stage. The unit is OUR
+  // sentence — the one playback stops at, Repeat repeats and the counter counts
+  // — and not a caption line: YouTube's own transcript already lists those, so
+  // a list of lines would be a worse copy of something the page already has.
+  function buildAside() {
+    elList = el('div', 'ytds-list');
+    // One listener for the whole list rather than one per block: a long video
+    // runs to thousands of them, and they are rebuilt on every caption load.
+    elList.addEventListener('click', (e) => {
+      const cue = e.target && e.target.closest && e.target.closest('.ytds-cue');
+      if (!cue) return;
+      const i = Number(cue.dataset.i);
+      if (!Number.isFinite(i)) return;
+      setFollow(true);   // a click is a request to be back with the player
+      playSentence(i);
+    });
+    // Scrolling by hand takes the list out of the player's hands. Our own
+    // scrollTop write fires this event too — hence the guard, without which
+    // following would switch itself off on the very first sentence.
+    elList.addEventListener('scroll', () => {
+      if (performance.now() - selfScrollAt < 150) return;
+      setFollow(false);
+    });
+    elFollow = mkBtn('ytds-sbtn ytds-follow', 'Follow the player again',
+      () => { setFollow(true); scrollToActive(); }, icon('chevD'), el('span', null, 'Follow'));
+    elAside = el('div', 'ytds-aside');
+    elAside.append(elList, elFollow);
+    return elAside;
+  }
+
+  function setFollow(on) {
+    if (following === on) return;
+    following = on;
+    if (elAside) elAside.classList.toggle('ytds-lost', !on);
+  }
+
+  // Built lazily: a closed panel costs nothing, and a video watched without
+  // opening it should not pay for thousands of nodes nobody asked to see.
+  function ensureTranscript() {
+    if (!elList || !state.transcript || !captionsReady || listBuilt) return;
+    renderTranscript();
+  }
+
+  function renderTranscript() {
+    elList.textContent = '';
+    listIdx = -1;
+    const frag = document.createDocumentFragment();
+    for (let i = 0; i < sentences.length; i++) {
+      const s = sentences[i];
+      const ua = uaSentences[i];
+      const cue = el('div', 'ytds-cue');
+      cue.dataset.i = String(i);
+      cue.append(el('div', 'ytds-cue-time', fmtTime(s.start)),
+                 el('div', 'ytds-cue-en', joinUnits(s.units)));
+      // A sentence with no translation gets no second block at all, rather than
+      // an empty one: a rough auto-translation does leave gaps (the aligner
+      // logs them), and a blank line reads as a broken block instead of as
+      // text that is simply not there.
+      const uaText = ua ? joinUnits(ua.units) : '';
+      if (uaText) cue.appendChild(el('div', 'ytds-cue-ua', uaText));
+      frag.appendChild(cue);
+    }
+    elList.appendChild(frag);
+    listBuilt = true;
+    dbg(`transcript: ${sentences.length} sentences listed`);
+  }
+
+  // Called from exactly where updateCounter() is called — under the frame gate,
+  // so at most once per sentence. It reads no clock and measures no geometry
+  // beyond the one block it moves to: the render loop stays as cheap as it was.
+  function syncTranscript() {
+    if (!listBuilt || sentIdx === listIdx) return;
+    const prev = listIdx >= 0 ? elList.children[listIdx] : null;
+    if (prev) prev.classList.remove('ytds-cur');
+    listIdx = sentIdx;
+    const cur = elList.children[listIdx];
+    if (cur) cur.classList.add('ytds-cur');
+    if (following) scrollToActive();
+  }
+
+  function scrollToActive() {
+    const cur = listIdx >= 0 && elList ? elList.children[listIdx] : null;
+    if (!cur) return;
+    // A third of the way down, not centred: what is coming is worth more of the
+    // panel than what has already been said.
+    selfScrollAt = performance.now();
+    elList.scrollTop = Math.max(0, cur.offsetTop - elList.clientHeight * 0.34);
+  }
+
+  // ---------- video mode ----------
+
+  // Nothing is reparented: the player stays exactly where YouTube put it and is
+  // handed a box. With the PAGE in fullscreen (see enterReader) it is already
+  // inside what the browser is showing, so the only thing between it and the
+  // eye is our own opaque background — which this mode takes away.
+  //
+  // Measured on a live watch page 2026-08-04: forced to 70vw × 100vh the player
+  // becomes 1344×961 and re-fits its <video> to 1344×756, centred — and that
+  // fit survives a seek, a quality change and a window resize with our
+  // `position: fixed` still in place.
+  function applyVideoMode() {
+    const p = hookedPlayer || document.getElementById('movie_player');
+    if (!p) return;
+    const want = !!(state.reader && state.videoMode);
+    // During an ad the player's own controls come back: Skip Ad lives in that
+    // chrome, and hiding it to spare the user two rows of buttons is not worth
+    // trapping them in a spot they cannot skip. The box stays as it is.
+    document.documentElement.classList.toggle('ytds-vmode', want && !adNow());
+    if (!want) {
+      if (playerStyleWas == null) return;
+      if (playerStyleWas) p.setAttribute('style', playerStyleWas);
+      else p.removeAttribute('style');
+      playerStyleWas = null;
+      fitPlayer();
+      dbg('video mode off — player geometry given back');
+      return;
+    }
+    if (playerStyleWas == null) {
+      playerStyleWas = p.getAttribute('style') || '';
+      dbg('video mode on — player geometry taken over');
+    }
+    // The transcript keeps its column; with it closed the picture takes the width.
+    const aside = state.transcript && elAside ? elAside.getBoundingClientRect().width : 0;
+    const box = {
+      position: 'fixed', left: '0px', top: '0px', margin: '0px',
+      width: Math.max(160, Math.round(window.innerWidth - aside)) + 'px',
+      height: '100vh', zIndex: '2147483000'
+    };
+    // Written only where it differs: this runs from tick() once a second, and
+    // YouTube rewriting the element's style is exactly what we want to undo —
+    // but rewriting our own values every second would re-fit the video forever.
+    let changed = false;
+    for (const k in box) if (p.style[k] !== box[k]) { p.style[k] = box[k]; changed = true; }
+    if (changed) fitPlayer();
+  }
+
+  // Only the player can re-lay the <video> inside its box, and `setSize` is its
+  // own method — it exists in the MAIN world alone, where injected.js lives:
+  // the content script can see the element but not what YouTube hung on it.
+  // The resize event goes too, because that is what the player listens to
+  // anyway, and it costs nothing when setSize has already done the work.
+  function fitPlayer() {
+    window.postMessage({ type: 'YTDS_FIT_PLAYER' }, '*');
+    window.dispatchEvent(new Event('resize'));
+  }
+
   // The offer to pick learning up where it stopped. It lives on the stage
   // because that is the one part of the overlay focus mode never hides — and
   // where the eyes already are.
@@ -2496,6 +2764,7 @@
     elPlay = mkBtn('ytds-icon ytds-play', 'Play', togglePlay, icon('play'));
     lastPlayIcon = 'play';   // a rebuilt panel starts from a known glyph
     elTime = el('div', 'ytds-time', '0:00 / 0:00');
+    elCounter = el('div', 'ytds-counter');
 
     elControls = el('div', 'ytds-controls');
     elControls.append(
@@ -2504,6 +2773,7 @@
       mkBtn('ytds-icon', 'Forward 10s', () => seekBy(10), icon('forward')),
       mkSpeedMenu(),
       elTime,
+      elCounter,
       buildScrub()
     );
     return elControls;
@@ -2831,6 +3101,11 @@
     if (btnTailReset) btnTailReset.disabled = !PLAYBACK_KEYS.some((k) => state[k] !== DEFAULTS[k]);
     for (const m of menus) m.sync();
     if (btnFocus) setIcon(btnFocus, state.focus ? 'eyeOff' : 'eye');
+    // Nothing to list, nothing to press — the same answer the pill gives on a
+    // video with no captions, rather than opening an empty panel.
+    if (btnTranscript) btnTranscript.disabled = !sentences.length;
+    ensureTranscript();
+    applyVideoMode();
     renderKeys();
     updateLabels();
     updateCounter();
@@ -2859,6 +3134,12 @@
     panel.className = 'ytds-panel ytds-theme-' + state.theme
       + (state.study ? ' ytds-study' : '')
       + (state.focus ? ' ytds-focus' : '')
+      + (state.transcript ? ' ytds-transcript-open' : '')
+      + (state.videoMode ? ' ytds-video' : '')
+      // The transcript follows the UK chip rather than owning a setting of its
+      // own: turn the translation off and the list is the original alone,
+      // twice as much of it on screen.
+      + (state.showUa ? '' : ' ytds-no-ua')
       + (awake ? ' ytds-awake' : '')
       + (resumeOpen() ? ' ytds-asking' : '')
       + (drawerIsOpen() ? ' ytds-drawer-open' : '');
@@ -2914,7 +3195,8 @@
     // On the panel, not on documentElement: the variable is read only by
     // .ytds-en/.ytds-ua, both of which live inside it, and writing it to the
     // page left our custom property on YouTube with the overlay long closed.
-    if (panel) panel.style.setProperty('--font-scale', state.fontScale || 1);
+    if (!panel) return;
+    panel.style.setProperty('--font-scale', state.fontScale || 1);
   }
 
   // The subtitle scale is a 5-step ladder (XS…XL), not a free slider.
@@ -3003,6 +3285,10 @@
       dbg('reader closed mid-capture — stopped asking the player');
     }
     state.reader = false; saveState();
+    // Before anything else undoes the overlay: the player must leave with the
+    // geometry it came in with, whether we are closing by Esc, by the ✕ or by
+    // the browser dropping out of fullscreen.
+    applyVideoMode();
     stopLoop();
     stopAt = null; // let the video play normally again outside study mode
     sentenceDone = false;
@@ -3189,6 +3475,11 @@
     // about ads just as much and are in no hurry.
     pumpAd();
     ensurePanel();
+    // Once a second is enough to put the box back after the things that take it
+    // away — a window resize, an ad ending, YouTube rewriting the element's
+    // style, a new video arriving without a page load. It writes only what
+    // differs, so a settled screen costs six string compares.
+    if (state.reader || playerStyleWas != null) applyVideoMode();
     const id = new URLSearchParams(location.search).get('v');
     if (id && id !== currentVideoId) {
       currentVideoId = id;

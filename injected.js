@@ -269,6 +269,21 @@
       return;
     }
 
+    // Video mode gives the player a box of our choosing, and the player only
+    // re-lays the <video> inside it when it is told to. setSize is the player's
+    // own method, so it exists in this world alone — the content script sees
+    // the element but not the properties YouTube hung on it.
+    // Measured on a live watch page 2026-08-04: with the box forced to 70vw ×
+    // 100vh, this fits the video to it (1344×756, centred) and the fit then
+    // survives a seek, a quality change and a window resize.
+    if (e.data.type === 'YTDS_FIT_PLAYER') {
+      try {
+        const p = document.getElementById('movie_player');
+        if (p && p.setSize) p.setSize();
+      } catch (_) {}
+      return;
+    }
+
     if (e.data.type === 'YTDS_STOP_ENABLE') {
       enableToken++; // invalidate any running retry loop
       restoreCc();   // and leave the player's CC as we found them

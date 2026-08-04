@@ -20,6 +20,7 @@
   --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Times New Roman", serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --u: min(1cqw, 1.7778cqh);
+  --aside-w: calc(30 * var(--u));   /* the transcript column, and the room it takes */
 }
 
 /* ---------- Themes: tone tokens per theme, everything else consumes them ---------- */
@@ -175,20 +176,39 @@
   justify-content: space-between;
   gap: calc(2 * var(--u));
   padding: calc(2.1 * var(--u)) calc(2.4 * var(--u)) 0;
+  /* Last line of defence: rather than push anything off the edge, the bar
+     grows a second row. Nothing in it is optional — the ✕ least of all. */
+  flex-wrap: wrap;
+  row-gap: calc(1 * var(--u));
 }
+/* The mode pills wrap among themselves when the bar narrows (the transcript
+   column takes a third of it). Before this they simply overflowed, and with
+   the panel clipping its own overflow the whole right-hand group — themes,
+   focus, settings, close — was pushed out of sight. */
 .ytds-top-side {
   display: flex;
   align-items: center;
   gap: calc(1 * var(--u));
-  flex: 1 1 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  flex-wrap: wrap;
 }
-.ytds-top-side.ytds-right { justify-content: flex-end; gap: calc(.8 * var(--u)); }
+/* Never shrinks, never wraps: these are the way out of the reader. */
+.ytds-top-side.ytds-right {
+  justify-content: flex-end;
+  gap: calc(.8 * var(--u));
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+}
+/* Lives in the transport now, next to the clock: both answer "where am I". */
 .ytds-counter {
   font: 500 calc(1.05 * var(--u)) / 1 var(--sans);
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--ink-3);
   white-space: nowrap;
+  flex: 0 0 auto;
+  padding-right: calc(1.2 * var(--u));
 }
 
 /* ---------- Focus mode ----------
@@ -198,6 +218,7 @@
    moves when the chrome comes and goes. */
 .ytds-focus .ytds-top,
 .ytds-focus .ytds-study-row,
+.ytds-focus .ytds-aside,
 .ytds-focus .ytds-controls {
   opacity: 0;
   pointer-events: none;
@@ -205,6 +226,7 @@
 }
 .ytds-focus.ytds-awake .ytds-top,
 .ytds-focus.ytds-awake .ytds-study-row,
+.ytds-focus.ytds-awake .ytds-aside,
 .ytds-focus.ytds-awake .ytds-controls {
   opacity: 1;
   pointer-events: auto;
@@ -302,11 +324,23 @@
    animation believed the class. It now lifts like every other icon button. */
 .ytds-icon.ytds-settings svg { width: 60%; height: 60%; }
 
+/* ---------- Body: the stage, and the transcript beside it ----------
+   One row between the top bar and the shadowing row. The transcript is IN the
+   row, not floating above it like the settings drawer — which is what makes
+   opening it narrow the stage instead of covering it. */
+.ytds-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: stretch;
+}
+
 /* ---------- Stage: EN above the fixed reading line, translation below ---------- */
 .ytds-stage {
   position: relative;   /* the resume card is centred against it */
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;         /* it is a flex ITEM now: without this it refuses to narrow */
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -351,6 +385,15 @@
   letter-spacing: -.012em;
   color: var(--accent);
 }
+/* The soft reveal on line-level tracks: the sentence is drawn whole and the
+   words not yet spoken are transparent. Opacity, not display or visibility —
+   the space is held either way, but only opacity can fade, and the word has to
+   arrive the way it does on a word-level track. */
+.ytds-word {
+  transition: opacity var(--d3) var(--ease-out);
+}
+.ytds-word.ytds-unsaid { opacity: 0; }
+
 /* ---------- Pointing at a phrase ----------
    Offered only while playback is stopped on a whole sentence. There is no
    permanent marking of the phrases: the complaint this answers was that there
@@ -370,12 +413,14 @@
   box-decoration-break: clone;
 }
 .ytds-pointable .ytds-chunk.ytds-lit { background-color: var(--bg-hover); }
-/* A sentence with nothing finer to say is one target, and then the source side
-   gets no background: it would wash a whole two-line sentence to mark the very
-   thing the cursor is already on, which says nothing. The answer side keeps
-   its mark — that is the half that carries the information, and with the
-   translation off it is the only thing on screen. */
-.ytds-one-target .ytds-zone-en .ytds-chunk.ytds-lit { background-color: transparent; }
+/* A sentence with nothing finer to say is one target — and then NEITHER side is
+   washed. Marking a whole two-line sentence says nothing that the cursor has
+   not already said, and doing it to one side only reads as a bug: the answer
+   lights up while the thing being pointed at does not.
+   Only the background goes. With the translation off, the phrase still APPEARS
+   (that is `visibility`, further down) — which is the case where a single
+   target genuinely has something to show. */
+.ytds-one-target .ytds-chunk.ytds-lit { background-color: transparent; }
 /* Only the translation steps back, never the source. The English line is the
    one being read; dimming four fifths of it every time the cursor crosses it
    would fight the reading instead of helping it. */
@@ -400,6 +445,227 @@
   color: var(--ink-3);
   text-align: center;
 }
+
+/* ---------- Transcript: every sentence of the video, beside the stage ----------
+   Same surface family as the settings drawer (--bg-elev, --line), but no --e4:
+   it does not float, it holds a column of the row. Its width comes from --u
+   like everything else, so on an ultra-wide screen it follows the HEIGHT and
+   cannot grow into half the picture. */
+/* Edge to edge: the full height of the screen, not of the row it is declared
+   in. Inside .ytds-body it ended where the shadowing row begins, which left a
+   dead band under it. */
+.ytds-aside {
+  display: none;
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--aside-w);
+  border-left: 1px solid var(--line);
+  background-color: var(--bg-elev);
+  background-image: linear-gradient(180deg, var(--sheen), rgba(255,255,255,0) 26%);
+}
+.ytds-transcript-open .ytds-aside { display: block; }
+/* Everything of ours steps aside for the column instead of running under it. */
+.ytds-transcript-open .ytds-top,
+.ytds-transcript-open .ytds-body,
+.ytds-transcript-open .ytds-study-row,
+.ytds-transcript-open .ytds-controls { margin-right: var(--aside-w); }
+/* The corner group stands down while the column is open. Squeezing six groups
+   plus these four into two thirds of the bar either wraps it to a second row
+   or pushes them off the edge — both worse than putting them away on purpose.
+   They come back with one click on Transcript, and `Esc` still closes the
+   reader whether they are on screen or not. */
+.ytds-transcript-open .ytds-top-side.ytds-right { display: none; }
+
+.ytds-list {
+  position: relative;   /* offsetTop of a block is measured against this */
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+.ytds-cue {
+  padding: calc(.6 * var(--u)) calc(.9 * var(--u));
+  border-bottom: 1px solid var(--line-2);
+  cursor: pointer;
+  transition: background-color var(--d2) var(--ease-out);
+  /* A three-hour video is ~2900 blocks. Rather than a virtual list — a whole
+     mechanism for a rare case — the browser is told to skip what is off
+     screen. `auto` in contain-intrinsic-size makes it remember each block's
+     real height once measured, so scrolling does not drift. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(3.4 * var(--u));
+}
+.ytds-cue:hover { background-color: var(--bg-hover); }
+.ytds-cue:last-child { border-bottom: none; }
+
+/* Sizes here are around ONE --u, not three. --u is min(1cqw, 1.7778cqh) — about
+   19px on a 1080p screen — so it is the unit the LAYOUT is built from: a whole
+   .ytds-sbtn is 3.1 of them. The first version set the sentence at 3.2 and put
+   text the height of a button in the panel, with barely two cues on screen. */
+.ytds-cue-time {
+  font: 400 calc(.72 * var(--u)) / 1.2 var(--mono);
+  color: var(--ink-3);
+  margin-bottom: calc(.2 * var(--u));
+}
+/* Serif for both languages: the same face the stage reads in. The size is
+   fixed on purpose — A−/A+ scales the SUBTITLES, and letting it scale the list
+   too would leave two sentences visible at XL. */
+.ytds-cue-en {
+  font: 400 calc(1.02 * var(--u)) / 1.34 var(--serif);
+  color: var(--ink);
+}
+.ytds-cue-ua {
+  font: 400 calc(.92 * var(--u)) / 1.34 var(--serif);
+  color: var(--ink-2);
+  margin-top: calc(.15 * var(--u));
+}
+/* The UK chip is off: the list is the original alone. */
+.ytds-no-ua .ytds-cue-ua { display: none; }
+
+/* The sentence the player is in. The bar is an inset shadow, not a border:
+   a border would shift the text by its own width on every sentence. */
+.ytds-cue.ytds-cur {
+  background-color: var(--accent-wash);
+  box-shadow: inset calc(.22 * var(--u)) 0 0 var(--accent);
+}
+
+/* Shown only once scrolling by hand has taken the list off the player.
+   Qualified by .ytds-aside on purpose: .ytds-sbtn sets display:inline-flex and
+   is declared further down the file, so a bare .ytds-follow would lose to it
+   and the button would sit there permanently. */
+.ytds-aside .ytds-follow {
+  display: none;
+  position: absolute;
+  left: 50%;
+  bottom: calc(1.6 * var(--u));
+  transform: translateX(-50%);
+  background-color: var(--bg-elev);
+  box-shadow: var(--e2);
+}
+.ytds-aside.ytds-lost .ytds-follow { display: inline-flex; }
+
+/* ---------- Video mode: the picture stays, the text sits on it ----------
+   The player is never moved into the panel. It keeps its place in YouTube's DOM
+   and is given a box by content.js; because the PAGE is the fullscreen element
+   (see enterReader), the player is already inside what the browser shows. So
+   all this does is stop painting over it — background away, clicks through —
+   while every child that IS ours paints and clicks as before. */
+.ytds-panel.ytds-video {
+  background-color: transparent;
+  background-image: none;
+  pointer-events: none;
+}
+/* Everything that takes clicks is NAMED. It used to be `.ytds-video > *`, and
+   that universal selector is what broke Next: .ytds-hint is a direct child of
+   the panel and ships with `pointer-events: none` on purpose — it is a caption
+   that must never be in the way — but `> *` has the same specificity and comes
+   later in the file, so it handed the hint its clicks back. The hint sits
+   centred at `bottom: 7 * --u` and measures ~274 × 39, which lands exactly on
+   the shadowing row; at `opacity: 0` it is invisible while still swallowing
+   every click. It appears the moment a sentence finishes playing ("Point at a
+   phrase…"), which is why the buttons died only after playback stopped.
+   The lesson is the rule, not the fix: never grant pointer-events with `*`. */
+.ytds-video .ytds-top,
+.ytds-video .ytds-study-row,
+.ytds-video .ytds-study-tray,
+.ytds-video .ytds-controls,
+.ytds-video .ytds-controls *,
+.ytds-video .ytds-aside,
+.ytds-video .ytds-drawer,
+.ytds-video .ytds-scrim,
+.ytds-video .ytds-sim-exit,
+.ytds-video .ytds-chunk,
+.ytds-video .ytds-resume,
+.ytds-video .ytds-resume * { pointer-events: auto; }
+/* Belt and braces: whatever else the panel grows, the hint stays out of it. */
+.ytds-video .ytds-hint { pointer-events: none; }
+/* The stage is the one exception: it covers the picture, and a click on it
+   belongs to the player (play/pause), not to us.
+   The exception is scoped to the STAGE, not to the whole row it sits in. The
+   first version switched clicks off on .ytds-body and listed what got them
+   back — and the resume card, which lives on the stage, was not on the list:
+   "You left off at sentence 2" was painted and dead, the same failure the ad
+   work already paid for once (a transparent ::backdrop showed the ad and would
+   not let it be pressed). Anything that is a control takes its clicks back
+   here; anything that is text lets them through. */
+.ytds-video .ytds-stage { pointer-events: none; }
+.ytds-video .ytds-chunk,
+.ytds-video .ytds-resume { pointer-events: auto; }
+
+/* Over video, theme tokens do not apply — sepia ink on a dark frame is
+   unreadable. These three are deliberately the same in all three themes: what
+   they sit on is the film, not our paper. */
+.ytds-panel.ytds-video {
+  --vid-fg: #ffffff;
+  --vid-fg-2: #ffd479;
+  --vid-scrim: rgba(0,0,0,.58);
+  --vid-lit: rgba(255,255,255,.26);
+}
+/* Pointing at a phrase, over video. The source line never dims its neighbours
+   (dimming four fifths of what is being read fights the reading), so its only
+   signal is the background — and --bg-hover is 7% of a theme's ink, mixed for
+   pale paper. On the scrim over a dark frame it is simply not there.
+   `:not(.ytds-one-target)` keeps the rule above intact: a sentence with a
+   single phrase still marks neither side. */
+.ytds-video .ytds-pointable:not(.ytds-one-target) .ytds-chunk.ytds-lit {
+  background-color: var(--vid-lit);
+}
+/* Subtitles go to the bottom of the picture, the way subtitles do. The reading
+   line is dropped with them: it exists to hold the eye at a fixed height on a
+   blank page, and on a moving picture it is one more thing in the way. */
+.ytds-video .ytds-stage {
+  justify-content: flex-end;
+  padding-bottom: calc(4 * var(--u));
+}
+/* The shadowing row shrinks over video: on a blank page it is the only thing
+   under the text and can afford the air, but here every row of it is picture
+   taken away from the film it sits on. */
+.ytds-panel.ytds-study.ytds-video .ytds-study-row { padding-bottom: calc(.8 * var(--u)); }
+.ytds-video .ytds-study-tray {
+  gap: calc(.4 * var(--u));
+  padding: calc(.35 * var(--u));
+}
+.ytds-video .ytds-study-tray .ytds-sbtn {
+  height: calc(2.5 * var(--u));
+  padding: 0 calc(1.1 * var(--u));
+}
+.ytds-video .ytds-rule { display: none; }
+.ytds-video .ytds-zone { min-height: 0; }
+.ytds-video .ytds-line {
+  color: var(--vid-fg);
+  background-color: var(--vid-scrim);
+  padding: calc(.3 * var(--u)) calc(1 * var(--u));
+  border-radius: var(--r-xs);
+  /* Each wrapped row gets the box, instead of one box behind a ragged block. */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.ytds-video .ytds-ua { color: var(--vid-fg-2); }
+
+/* The bar and the transport now float on the film and need their own footing. */
+.ytds-video .ytds-top {
+  background-image: linear-gradient(180deg, rgba(0,0,0,.62), rgba(0,0,0,0));
+  color: var(--vid-fg);
+}
+.ytds-video .ytds-controls,
+.ytds-video .ytds-study-row {
+  background-image: linear-gradient(0deg, rgba(0,0,0,.62), rgba(0,0,0,0));
+}
+/* The clock and the counter are bare text down there — the buttons carry their
+   own surfaces, these do not, and --ink-3 on a dark frame is barely there. */
+.ytds-video .ytds-time,
+.ytds-video .ytds-counter { color: var(--vid-fg); }
+
+/* Two rows of transport, one under the other, is what the reference screenshot
+   does NOT have — and ours is the one that knows where sentences begin. The
+   player's own chrome goes away, except during an ad: Skip Ad lives in it, so
+   applyVideoMode drops this class for as long as the spot is playing. */
+html.ytds-vmode #movie_player .ytp-chrome-bottom,
+html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
 
 /* ---------- Resume: the sentence study stopped on last time ---------- */
 /* It sits on the stage because that is the one part of the overlay focus mode
