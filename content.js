@@ -133,6 +133,7 @@
   // never disagree with the stage about what a sentence is.
   let elAside, elList, elFollow;
   let listBuilt = false;    // this video's sentences are already in the list
+  let listBuilding = false; // …and a long one is being built right now
   let listIdx = -1;         // which block currently wears the active class
   // Following is an intent for this sitting, like sentenceDone — never saved.
   let following = true;
@@ -2621,12 +2622,35 @@
 
   // Built lazily: a closed panel costs nothing, and a video watched without
   // opening it should not pay for thousands of nodes nobody asked to see.
+  //
+  // On a four-hour video (ikqTTXVRVog) that build is long enough for the button
+  // to look dead. Saying "working on it" does not fix that on its own: the
+  // build blocks the main thread, so a class set immediately before it would
+  // never get painted. Hence two frames — one for the browser to draw the busy
+  // state, one to be sure it did — and only then the work.
+  const LIST_ASYNC_FROM = 400;   // fewer than this and the build beats a frame
   function ensureTranscript() {
-    if (!elList || !state.transcript || !captionsReady || listBuilt) return;
-    renderTranscript();
+    if (!elList || !state.transcript || !captionsReady || listBuilt || listBuilding) return;
+    if (sentences.length < LIST_ASYNC_FROM) { renderTranscript(); return; }
+    listBuilding = true;
+    setListBusy(true);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      // Two frames is long enough for the video, the language or the panel to
+      // have moved on — the conditions are asked again, not assumed.
+      if (elList && state.transcript && captionsReady && !listBuilt) renderTranscript();
+      listBuilding = false;
+      setListBusy(false);
+    }));
+  }
+
+  function setListBusy(on) {
+    if (!btnTranscript) return;
+    btnTranscript.classList.toggle('ytds-busy', on);
+    btnTranscript.disabled = on || !sentences.length;
   }
 
   function renderTranscript() {
+    const t0 = performance.now();
     elList.textContent = '';
     listIdx = -1;
     const frag = document.createDocumentFragment();
@@ -2647,7 +2671,9 @@
     }
     elList.appendChild(frag);
     listBuilt = true;
-    dbg(`transcript: ${sentences.length} sentences listed`);
+    // The number is here to be compared later: this is the one place in the
+    // reader whose cost grows with the length of the video.
+    dbg(`transcript: ${sentences.length} sentences listed in ${Math.round(performance.now() - t0)} ms`);
   }
 
   // Called from exactly where updateCounter() is called — under the frame gate,
@@ -3102,8 +3128,9 @@
     for (const m of menus) m.sync();
     if (btnFocus) setIcon(btnFocus, state.focus ? 'eyeOff' : 'eye');
     // Nothing to list, nothing to press — the same answer the pill gives on a
-    // video with no captions, rather than opening an empty panel.
-    if (btnTranscript) btnTranscript.disabled = !sentences.length;
+    // video with no captions, rather than opening an empty panel. Never while a
+    // long list is being built, or syncUi would re-enable the button mid-build.
+    if (btnTranscript && !listBuilding) btnTranscript.disabled = !sentences.length;
     ensureTranscript();
     applyVideoMode();
     renderKeys();

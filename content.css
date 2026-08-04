@@ -822,6 +822,28 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   transition: transform var(--d2) var(--ease-out), box-shadow var(--d2) var(--ease-out);
 }
 .ytds-pill-text { font-family: var(--sans); font-size: calc(1.15 * var(--u)); }
+/* Building a long list. The spinner REPLACES the glyph rather than joining it:
+   a pill that changes width while it works shifts the whole bar under the
+   cursor that just pressed it. Measured on a four-hour video, where the build
+   is long enough for a button with no answer to read as a broken one. */
+.ytds-pill.ytds-busy {
+  position: relative;
+  cursor: progress;
+}
+.ytds-pill.ytds-busy svg { visibility: hidden; }
+.ytds-pill.ytds-busy::before {
+  content: '';
+  position: absolute;
+  left: calc(1.1 * var(--u));
+  width: calc(1.4 * var(--u));
+  height: calc(1.4 * var(--u));
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  opacity: .8;
+  animation: ytds-spin 620ms linear infinite;
+}
+@keyframes ytds-spin { to { transform: rotate(1turn); } }
 .ytds-pill.ytds-on {
   border-color: var(--accent);
   background-color: var(--accent);
