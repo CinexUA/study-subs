@@ -385,6 +385,17 @@
   letter-spacing: -.012em;
   color: var(--accent);
 }
+/* Not a translation but an explanation of its absence — smaller, quieter, and
+   in the interface face rather than the reading one, so it is never mistaken
+   for the text it is standing in for. */
+.ytds-line.ytds-ua-none {
+  font: 400 calc(1.3 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink-3);
+}
+/* Over video it keeps the quiet grey rather than the translation's warm yellow:
+   it is not the translation. */
+.ytds-video .ytds-line.ytds-ua-none { color: rgba(255, 255, 255, .62); }
+
 /* The soft reveal on line-level tracks: the sentence is drawn whole and the
    words not yet spoken are transparent. Opacity, not display or visibility —
    the space is held either way, but only opacity can fade, and the word has to

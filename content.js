@@ -132,6 +132,10 @@
   // not state — it is born in finishBuild and dies in loadCaptions, so it can
   // never disagree with the stage about what a sentence is.
   let elAside, elList, elFollow;
+  // Where YouTube's translation stops on this video (Infinity when it reaches
+  // the end). Past it the zone says so instead of standing empty: blank space
+  // reads as a broken extension, and this is an answer, not a failure.
+  let uaCoverEnd = Infinity;
   let listBuilt = false;    // this video's sentences are already in the list
   let listBuilding = false; // …and a long one is being built right now
   let listIdx = -1;         // which block currently wears the active class
@@ -985,34 +989,44 @@
   const AL_TIME_CAP = 12;  // past this the anchor has said all it can say
   const AL_SKEW = 2.5;     // leaving one-sentence-for-one-sentence needs real evidence
   const AL_DROP = 8;       // leaving a sentence with no partner: a last resort
-  // How far from proportional the pairing may wander. It used to be a flat 80,
-  // chosen on a 573-sentence track where that is 14% of the whole — and it is
-  // 1.5% of a 5504-sentence one. The band is centred on the PROPORTIONAL
-  // diagonal, so a steady rate of merges costs nothing; what walks out of it is
-  // merges that CLUSTER, and a language lesson is nothing but clusters (short
-  // question/answer pairs join into one translated sentence, monologue does
-  // not). Measured on ikqTTXVRVog's real 5504 sentences against a synthetic
-  // translation whose answer was known (2026-08-04):
+  // A translation can stop short of the end of a long video. YouTube keeps
+  // answering with events all the way to the last second — it just stops
+  // putting TEXT in them. Measured on ikqTTXVRVog (4:52:25) 2026-08-04:
   //
-  //   merges spread evenly   → band 80: 0 wrong buckets
-  //   merges clustered       → band  80: 3984 wrong (72.4%)
-  //                            band 200: 1811 (32.9%)
-  //                            band 400: 0
+  //   UK units up to 4:00:45 : 22812      after it: 3
+  //   EN units after 4:00:45 :  5921
   //
-  // Hence proportional, with a floor that leaves every previously measured
-  // track exactly as it was (80 wins below ~1000 sentences) and a ceiling from
-  // MEMORY, not from taste: the table is Float64 + Int8 per cell, so the cap is
-  // expressed in cells and works out at ~40 MB while the table lives.
-  const AL_BAND_MIN = 80, AL_BAND_MAX = 500, AL_BAND_FRAC = 0.08;
-  const AL_CELLS = 4.5e6;
-  function bandFor(n) {
-    const byMem = Math.floor((AL_CELLS / (n + 1) - 2) / 2);
-    return clamp(Math.min(Math.round(n * AL_BAND_FRAC), byMem), AL_BAND_MIN, AL_BAND_MAX);
+  // Aligning across that boundary asks the pairing to cover an hour of video
+  // with nothing to cover it with, and DP obliges: it spreads the last real
+  // sentences into crumbs ("У тебе" under "You look a little tired.") and
+  // leaves the rest blank. So the alignment is asked only about the part that
+  // HAS a translation, and everything past it is honestly empty.
+  //
+  // The 60 s slack is deliberate: a track that simply ends with the speech,
+  // or one whose last cue is a little early, must not trip this.
+  const AL_TAIL_SLACK = 60;
+  function alignCovered(uaSents, enSents) {
+    uaCoverEnd = Infinity;
+    const last = uaSents.length ? uaSents[uaSents.length - 1] : null;
+    const reach = last ? Math.max(last.start, last.units.length ? last.units[last.units.length - 1].t : 0) : 0;
+    const enEnd = enSents.length ? enSents[enSents.length - 1].start : 0;
+    if (!last || reach >= enEnd - AL_TAIL_SLACK) return alignSentences(uaSents, enSents);
+    uaCoverEnd = reach;
+    let cut = enSents.length;
+    while (cut > 0 && enSents[cut - 1].start > reach) cut--;
+    dbg(`translation covers ${fmtTime(reach)} of ${fmtTime(enEnd)} — aligning the first `
+        + `${cut} of ${enSents.length} sentences, the rest have no translation to show`);
+    const head = alignSentences(uaSents, enSents.slice(0, cut));
+    const tail = enSents.slice(cut).map((s) => ({ start: s.start, end: s.end, units: [] }));
+    return head.concat(tail);
   }
+
+  // How far from the band's centre the pairing may wander. Flat again, and
+  // generous, because the centre is now the honest one — see the band below.
+  const AL_BAND = 80;
   const AL_MOVES = [[1, 1], [1, 2], [2, 1], [1, 3], [3, 1], [1, 0], [0, 1]];
   function alignSentences(uaSents, enSents) {
     const n = enSents.length, m = uaSents.length;
-    const AL_BAND = bandFor(n);
     const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
     if (!n || !m) return out;
 
@@ -1051,12 +1065,36 @@
     // cannot wander AL_BAND sentences away from proportional and still be the
     // cheapest. A full table would cost 80 MB on a three-hour video; this costs
     // a fraction of a megabyte on any of them.
+    // The band is centred on TIME, not on proportion. Both tracks are the same
+    // audio on the same clock — measured on ikqTTXVRVog 2026-08-04, where the
+    // translation at 233:56 says exactly what the original at 233:56 says — so
+    // the UA sentence nearest in time is the best prior there is for where the
+    // pairing runs.
+    //
+    // Proportion assumes the ratio of sentence counts is CONSTANT, and on a long
+    // video it is not: on that track the true pairing wandered up to 798
+    // sentences away from the proportional diagonal (median 397, p90 715),
+    // rising through the video and falling back at the end. No sane band around
+    // that diagonal covers it — 80 failed, 407 failed, and the next video would
+    // want a different number. Around the time diagonal, 80 is generous.
+    //
+    // `c` only ever moves forward, so lo/hi stay non-decreasing and the table
+    // stays walkable; the two ends are pinned because the DP starts at (0,0) and
+    // must be able to finish at (n,m).
     const lo = new Int32Array(n + 1), hi = new Int32Array(n + 1);
+    let c = 0;
     for (let i = 0; i <= n; i++) {
-      const c = Math.round((i * m) / n);
+      if (i < n) {
+        const t = enSents[i].start;
+        while (c + 1 < m && Math.abs(uaSents[c + 1].start - t) <= Math.abs(uaSents[c].start - t)) c++;
+      } else {
+        c = m;
+      }
       lo[i] = Math.max(0, c - AL_BAND);
       hi[i] = Math.min(m, c + AL_BAND);
     }
+    lo[0] = 0;
+    hi[n] = m;
     const W = 2 * AL_BAND + 2;
     const at = (i, j) => (j < lo[i] || j > hi[i] ? -1 : i * W + (j - lo[i]));
     const best = new Float64Array((n + 1) * W).fill(Infinity);
@@ -1752,7 +1790,7 @@
     enLines = groupUnitsToLines(enUnits);
     sentences = buildSentences(enUnits);
     const uaSents = sameLang ? sentences : splitIntoSentences(uaUnits);
-    uaSentences = sameLang ? sentences : alignSentences(uaSents, sentences);
+    uaSentences = sameLang ? sentences : alignCovered(uaSents, sentences);
     uaLines = sameLang ? enLines : spreadToLines(uaSentences, sentences, enLines);
     sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
@@ -2230,8 +2268,17 @@
     // class rather than left empty: that is what lets one phrase appear on
     // demand, and appear in the PLACE it holds in the line. Hover then only
     // ever toggles classes — it can never reach the render loop.
-    paint(elZoneUa, 'ytds-ua', (state.showUa || pairs) && uaS
-      ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf, words: pairs ? -1 : uaW }] : []);
+    // Past the end of YouTube's translation the zone says why it is empty. Only
+    // there: a single sentence the aligner left without a partner is a normal
+    // gap and does not deserve an announcement on every one of them.
+    const beyond = !!(enS && enS.start > uaCoverEnd);
+    if (beyond && state.showUa && !pairs) {
+      paint(elZoneUa, 'ytds-ua ytds-ua-none',
+        [{ text: `YouTube's translation ends at ${fmtTime(uaCoverEnd)}` }]);
+    } else {
+      paint(elZoneUa, 'ytds-ua', (state.showUa || pairs) && uaS
+        ? [{ text: uaWords, fresh, chunks: pairs && pairs.uaOf, words: pairs ? -1 : uaW }] : []);
+    }
     elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
     elStage.classList.toggle('ytds-pointable', !!pairs);
     elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
