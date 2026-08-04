@@ -985,10 +985,34 @@
   const AL_TIME_CAP = 12;  // past this the anchor has said all it can say
   const AL_SKEW = 2.5;     // leaving one-sentence-for-one-sentence needs real evidence
   const AL_DROP = 8;       // leaving a sentence with no partner: a last resort
-  const AL_BAND = 80;      // how far from proportional the pairing may wander
+  // How far from proportional the pairing may wander. It used to be a flat 80,
+  // chosen on a 573-sentence track where that is 14% of the whole — and it is
+  // 1.5% of a 5504-sentence one. The band is centred on the PROPORTIONAL
+  // diagonal, so a steady rate of merges costs nothing; what walks out of it is
+  // merges that CLUSTER, and a language lesson is nothing but clusters (short
+  // question/answer pairs join into one translated sentence, monologue does
+  // not). Measured on ikqTTXVRVog's real 5504 sentences against a synthetic
+  // translation whose answer was known (2026-08-04):
+  //
+  //   merges spread evenly   → band 80: 0 wrong buckets
+  //   merges clustered       → band  80: 3984 wrong (72.4%)
+  //                            band 200: 1811 (32.9%)
+  //                            band 400: 0
+  //
+  // Hence proportional, with a floor that leaves every previously measured
+  // track exactly as it was (80 wins below ~1000 sentences) and a ceiling from
+  // MEMORY, not from taste: the table is Float64 + Int8 per cell, so the cap is
+  // expressed in cells and works out at ~40 MB while the table lives.
+  const AL_BAND_MIN = 80, AL_BAND_MAX = 500, AL_BAND_FRAC = 0.08;
+  const AL_CELLS = 4.5e6;
+  function bandFor(n) {
+    const byMem = Math.floor((AL_CELLS / (n + 1) - 2) / 2);
+    return clamp(Math.min(Math.round(n * AL_BAND_FRAC), byMem), AL_BAND_MIN, AL_BAND_MAX);
+  }
   const AL_MOVES = [[1, 1], [1, 2], [2, 1], [1, 3], [3, 1], [1, 0], [0, 1]];
   function alignSentences(uaSents, enSents) {
     const n = enSents.length, m = uaSents.length;
+    const AL_BAND = bandFor(n);
     const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
     if (!n || !m) return out;
 
