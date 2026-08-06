@@ -89,6 +89,17 @@
   // enLines.length, which tied the caption-loading path to a structure that
   // only free reading renders — touch that mode and the loader changes meaning.
   let captionsReady = false;
+  // The build on screen is short of the translation that was asked for. Success
+  // used to be measured on the source alone, and the source cache made that
+  // measurement blind: it answers from disk, so a url the player minted before
+  // its `pot` was ready is never tried and never found out — only the
+  // translation goes near the network, gets HTTP 200 with 0 bytes, and the load
+  // reports success with an empty translation zone (reported 2026-08-06).
+  let translationMissing = false;
+  // …and the rebuild that a freshly minted url earns, allowed once per load: a
+  // video whose translation genuinely does not exist would otherwise rebuild on
+  // every timedtext request the player makes.
+  let retriedForTranslation = false;
   let enUnitLen = 0, uaUnitLen = 0;
   let srcLang = '';
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
@@ -1840,6 +1851,17 @@
     return true;
   }
 
+  // An empty 200 is the url talking, not the track (measured 2026-07-28). What
+  // tells "the token is dead" from "this language really has no translation" is
+  // NOT whether a `pot` is present — playerResponse may well carry a stale one,
+  // and a stale token looks exactly like a missing one from here. It is whether
+  // the url is one the PLAYER itself has just used successfully: that is the
+  // only kind we know is live, and interception is the only way to get one.
+  const provenBase = (u) => !!capturedBase && u === capturedBase;
+  // Kept for the log alone: what playerResponse actually hands out is a thing
+  // this project has never measured, and the answer decides nothing here.
+  const hasPot = (u) => /[?&]pot=/.test(String(u || ''));
+
   // The cheapest path there is: no request, no interception, no `pot`. A full
   // set or nothing — the source alone would mean rendering against an empty
   // translation zone while a fetch runs behind it, and the network path below
@@ -1903,7 +1925,11 @@
     } else {
       uaUnits = await translationUnits(base, state.targetLang);
     }
-    if (!sameLang && !uaUnits.length) {
+    translationMissing = !sameLang && !uaUnits.length;
+    // Not while a fresh url is still on its way: over an unproven url the loader
+    // carries on to the loud half, and telling the reader it failed over a retry
+    // in flight is simply wrong. The give-up branch says it instead.
+    if (translationMissing && (provenBase(base) || throttledUntil > performance.now())) {
       showHint(throttledUntil > performance.now()
         ? 'YouTube is rate-limiting caption requests — the translation will come back in a few minutes'
         : 'Translation did not load — pick the language again', 4500);
@@ -1926,6 +1952,7 @@
     ticksDur = 0; ticksLen = -1;
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false; pokePending = false;
+    translationMissing = false; retriedForTranslation = false;
     captureRetries = 0; sawTracks = false;
     availability = 'unknown';
     clearTimeout(captureTimer);
@@ -1963,8 +1990,21 @@
       sawTracks = true;
       const src = pickSrc(tracks);
       srcLang = src.lang || '';
-      if (await buildFromBase(src.baseUrl, null, '')) { dbg('direct fetch succeeded'); return; }
-      dbg('direct fetch returned 0 → need interception');
+      if (await buildFromBase(src.baseUrl, null, '')) {
+        // Having the source is not having what was asked for. This url comes
+        // from playerResponse and has never been proven — and the source,
+        // answered from disk, never went near the network to prove it. So an
+        // empty translation here is not an answer about the language, it is an
+        // answer about the url. Carrying on to the loud half is the only thing
+        // that can get a url the player has just used; what is already built
+        // stays on screen while that happens.
+        const retry = translationMissing && throttledUntil <= performance.now();
+        if (!retry) { dbg('direct fetch succeeded'); return; }
+        dbg(`direct fetch got the source, but ${state.targetLang} came back empty`
+          + ` (playerResponse url, pot=${hasPot(src.baseUrl) ? 'YES' : 'NO'}) → asking the player for one it has used`);
+      } else {
+        dbg('direct fetch returned 0 → need interception');
+      }
     }
 
     // The player has spoken and it lists no tracks. Switching its CC on could
@@ -1990,8 +2030,14 @@
     // user who has CC on for their own reasons is captured for free.
     if (!state.reader) {
       pokePending = true;
-      dbg('captions need the player switched on — holding off until the reader is opened');
-      setStatus('open the reader to load captions');
+      // With the source already on screen the wait is for a translation, not for
+      // captions — saying "open the reader to load captions" over a page that
+      // has them would be a lie, and the status line is what the placeholder
+      // shows.
+      dbg(captionsReady
+        ? 'the translation needs a url the player has not minted yet — waiting for the reader to be opened'
+        : 'captions need the player switched on — holding off until the reader is opened');
+      if (!captionsReady) setStatus('open the reader to load captions');
       return;
     }
     pokePlayer();
@@ -2002,14 +2048,24 @@
   function pokePlayer() {
     pokePending = false;
     awaitingCapture = true;
-    setStatus('enabling player captions…');
+    if (!captionsReady) setStatus('enabling player captions…');
     dbg('→ asking player to enable CC (YTDS_ENABLE)');
     window.postMessage({ type: 'YTDS_ENABLE' }, '*');
     clearTimeout(captureTimer);
     captureTimer = setTimeout(() => {
-      if (!awaitingCapture || captionsReady) return;
+      // Gated on the wait alone, not on captionsReady as well. Switching the
+      // player's CC on is not a local act — it is remembered for every later
+      // video and the next session — so the one thing this timer must always do
+      // is put them back. With the source already on screen the old gate
+      // returned here and left them on for good.
+      if (!awaitingCapture) return;
       awaitingCapture = false;
       window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
+      if (captionsReady) {
+        dbg('gave up waiting for a url with a live pot — the translation stays empty for now');
+        if (translationMissing) showHint('Translation did not load — try Reload captions in the settings drawer', 4500);
+        return;
+      }
       if (sawTracks) {
         dbg('gave up: the player never returned usable captions for this track');
         // Not "switch CC off and on" any more: giving up restores the player's
@@ -2051,7 +2107,16 @@
       // in hand.
       if (!capTlang && memCache.has(cacheKey('src'))) capturedBody = null;
     }
-    if (captionsReady) return;
+    // Captions are up, and normally that is the end of it. The exception is the
+    // one this url may be the cure for: the translation is missing because the
+    // url we had carried no live token, and this one might. Once per load — a
+    // video whose translation genuinely does not exist would otherwise rebuild
+    // on every request the player makes.
+    if (captionsReady && !(translationMissing && !retriedForTranslation)) return;
+    if (captionsReady) {
+      retriedForTranslation = true;
+      dbg('rebuilding on a freshly minted url — the translation was missing');
+    }
 
     // No body AND no token in the url: there is nothing here to fetch with, and
     // asking anyway spends a request on a quota that answers 429. An empty body
