@@ -27,7 +27,10 @@
   // ESTIMATED to end — see sentenceStop. Typed in, not picked from a ladder:
   // the right value is a property of the speaker, and finding it is a matter
   // of nudging by 50 ms and listening, which named steps cannot express.
-  const TAIL_MIN = 0, TAIL_MAX = 2000;
+  // The tail is dragged, not typed. 21 positions is the whole range at a step
+  // coarse enough that every notch is a different thing to hear — 10 ms apart,
+  // which is what a typed field invited, is below what anyone can tell apart.
+  const TAIL_MIN = 0, TAIL_MAX = 2000, TAIL_STEP = 100;
   // The settings the drawer's Playback group owns, and therefore the settings
   // its Reset returns to DEFAULTS. A future option joins this list and is
   // covered by the button without another line anywhere else.
@@ -134,7 +137,7 @@
   let captureRetries = 0, sawTracks = false;
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
-  let btnTailReset, inpTail;
+  let btnTailReset, inpTail, elTailVal, elTailReach;
   let btnStudy, btnFocus, btnTranscript, btnVideo;
   // Video mode borrows the player's geometry and must give it back exactly.
   // null = we have not taken it; a string (possibly empty) = what was there.
@@ -232,10 +235,12 @@
     if (!SPEEDS.some((v) => Math.abs(v - state.speed) < 0.001)) {
       state.speed = SPEEDS.reduce((a, b) => (Math.abs(b - state.speed) < Math.abs(a - state.speed) ? b : a));
     }
-    // The tail is typed in, so the saved value is whatever was typed last —
-    // including on a build whose limits were different. Clamp rather than
-    // snap: any number in range is legitimate here, unlike the speed ladder.
-    const savedTail = Math.round(Number(state.tailMs));
+    // The tail was typed in until the slider replaced the field, so a saved
+    // value can be any number at all — 450 from an older build, or a limit that
+    // no longer exists. Snap it to the ladder the slider now offers, the same
+    // way the speed above does: a control whose handle sits between two notches
+    // is a control lying about the value it holds.
+    const savedTail = Math.round(Number(state.tailMs) / TAIL_STEP) * TAIL_STEP;
     state.tailMs = Number.isFinite(savedTail) ? clamp(savedTail, TAIL_MIN, TAIL_MAX) : DEFAULTS.tailMs;
     document.documentElement.classList.remove('ytds-reader');
     ensurePanel();
@@ -753,6 +758,24 @@
   // paused, audible where speech ran on. The price is named: on very tight
   // sentences the last word now loses a few tens of ms.
   const SENT_GUARD_MIN = 0.15;
+  // Both of those are silence owed to the next WORD, and they are only that
+  // where `next.t` IS a word onset — a word-level track, where json3 hands out
+  // the next word's start as this one's end. On a line-level track `next.t` is
+  // when the next CAPTION is displayed: a boundary the captioner drew, which
+  // says nothing about when the next word sounds. On yhGzXULZkEw 95 of 290 line
+  // breaks are contiguous — this line's own recorded end IS `next.t` — so the
+  // guard there does not spend silence, it spends the last word, and the floor
+  // spends it too. That is a setting with no lever: measured on sentence 46,
+  // "…about turning ideas into something real.", recorded end 293.96, next unit
+  // 293.96, stop 293.756 at tail 0, 300 and 2000 alike. Heard as "…rea…" at
+  // every value, which is exactly how it was reported.
+  //
+  // On such a track the caption boundary is the guard. The sentence gets its
+  // whole displayed window and not a millisecond more — `next.t - 0.03` at the
+  // end of sentenceStop still keeps the stop off the next unit's first frame,
+  // and it is structural rather than a matter of taste, so it stays.
+  const sentGuard = () => (wordLevel ? SENT_GUARD : 0);
+  const sentGuardMin = () => (wordLevel ? SENT_GUARD_MIN : 0);
 
   // When the last word is spoken to the end: parser-provided end if any,
   // clamped by the next word's onset and by a max plausible word length.
@@ -795,7 +818,16 @@
     // word, it is that word's onset wearing a disguise, and the unit's own
     // text is the better witness.
     const est = u.t + estSpeechDur(u.text);
-    const ridesNext = u.end == null || u.end >= next.t - 0.05;
+    // "Runs into the next word" is the same claim about `next.t` that the guard
+    // makes, and it fails in the same place. On a word-level track an `end` that
+    // reaches `next.t` really is the next onset in disguise. On a line-level one
+    // it is two captions touching — which is how a captioner lays out continuous
+    // speech, and says nothing about the end being invented. Distrusting it there
+    // threw away the only recorded end we had and fell back to a letter count:
+    // that is the other half of why sentence 46 stopped at 293.756 with its own
+    // end at 293.96. A missing end still rides, on any track — there is nothing
+    // else to go on then.
+    const ridesNext = u.end == null || (wordLevel && u.end >= next.t - 0.05);
     // Trusted: the end the track gives, as it stands. It used to be capped by
     // the estimate as well (`Math.min(u.end, est)`), which undid the very thing
     // this branch establishes — that `u.end` is a real recorded end, because it
@@ -822,20 +854,34 @@
     // (What each was: 120 ms on the estimate branch, 200 on the trusted one.
     // One field cannot say both, and does not need to — this is one idea.)
     const tail = tailSec();
+    const guard = sentGuard(), guardMin = sentGuardMin();
     // Where we would like to pause: today's boundary, then the guarantee
     // that the floor may no longer overrule.
+    // How far the tail is allowed to reach. On a word-level track `next.t` is a
+    // real word onset and stopping before it is the entire point. On a
+    // line-level track it is where the next CAPTION is displayed, and that can
+    // fall INSIDE the last word. Measured on yhGzXULZkEw with ffmpeg, sentence
+    // 46 — "…about turning ideas into something real.":
+    //   the word `real` sounds to 294.16; the sentence break is the -51 dB
+    //   trough at 294.18–294.34; the caption hands its line over at 293.956.
+    // So the caption boundary is 200 ms short of the word's own end, and while
+    // it was the ceiling the video stopped mid-vowel — heard as "real e…" — at
+    // every value of the setting, which is how this was reported over and over.
+    // On such a track the tail is the budget and the caption boundary is not a
+    // wall. The only wall left stops a whole caption being swallowed.
+    const roof = wordLevel
+      ? next.t - guardMin
+      : (next.end != null ? next.end - 0.08 : next.t + 1.5);
+    const aim = Math.min(spoken + tail, wordLevel ? next.t - guard : roof);
     const want = Math.min(
-      Math.max(
-        Math.min(spoken + tail, next.t - SENT_GUARD),
-        Math.min(u.t + 0.12, next.t - 0.06) // floor: the last unit gets to sound
-      ),
-      next.t - SENT_GUARD_MIN               // …which silence now outranks
+      Math.max(aim, Math.min(u.t + 0.12, next.t - 0.06)), // floor: the last unit gets to sound
+      roof
     );
-    // And two limits that are structural rather than a matter of taste:
-    // a stop at or past the next onset plays the very word we are avoiding,
-    // and a stop before the sentence began gives uaRevealCount a negative
-    // span and findSentenceAt a sentence it can never be inside.
-    const stop = Math.min(Math.max(want, start + 0.02), next.t - 0.03);
+    // A stop before the sentence began gives uaRevealCount a negative span and
+    // findSentenceAt a sentence it can never be inside. The old upper limit
+    // (`next.t - 0.03`) is now the roof above, which on a word-level track is
+    // the same thing it always was.
+    const stop = Math.min(Math.max(want, start + 0.02), wordLevel ? next.t - 0.03 : roof);
     // Under ~150 ms between the two onsets both wishes cannot hold at once,
     // and silence wins: the last word is then cut short of its own onset.
     // At that distance it is a syllable fragment on an ASR timestamp, but
@@ -846,7 +892,7 @@
     // spend the silence before the next word and no more, so on a sentence the
     // next one follows straight into, every value produces the same boundary —
     // which reads as a dead field unless something says otherwise.
-    const pinned = spoken + tail > next.t - SENT_GUARD;
+    const pinned = spoken + tail > (wordLevel ? next.t - guard : roof);
     return { stop, gap: next.t - stop, trimmed: stop < u.t, pinned };
   }
 
@@ -876,8 +922,12 @@
     // Say what the change actually did. Without this the field is unfalsifiable
     // from the couch: you raise it, the ending sounds the same, and there is no
     // way to tell a value too small from a track with no silence to give.
-    dbg(`sentence tail ${state.tailMs} ms: ${moved} of ${n} stops moved`
-      + `, ${pinned} pinned by the ${Math.round(SENT_GUARD * 1000)} ms of silence owed to the next word`);
+    // …and by WHAT they are pinned, which is not the same sentence on the two
+    // kinds of track: a word onset we owe silence to, or the caption boundary
+    // that is all a line-level track knows about where the next word begins.
+    dbg(`sentence tail ${state.tailMs} ms: ${moved} of ${n} stops moved, ${pinned} pinned by `
+      + (wordLevel ? `the ${Math.round(SENT_GUARD * 1000)} ms of silence owed to the next word`
+                   : 'the start of the next caption line, which is where this one ends'));
     // Re-arm against the new boundary WITHOUT armStudy(): that would clear
     // sentenceDone, and the sentence you just heard cut off is exactly the one
     // you want ▶ to play again after raising the value.
@@ -1330,7 +1380,18 @@
   // arms a stop 1 ms away, so playback dies the instant it starts.
   const SENT_EPS = 0.02;
   function findSentenceAt(t) {
-    for (let i = 0; i < sentences.length; i++) if (t < sentences[i].stop - SENT_EPS) return i;
+    // Two different questions used to share one number. `stop` is where
+    // PLAYBACK pauses, and on a line-level track it may now run past the next
+    // sentence's first word — the caption boundary is no longer a wall for it.
+    // Which sentence the playhead is IN cannot work that way: a stop beyond the
+    // next start would make that sentence unreachable and walk the reader
+    // backwards. So the boundary read here is the stop, held short of the next
+    // sentence's own beginning.
+    for (let i = 0; i < sentences.length; i++) {
+      const nx = sentences[i + 1];
+      const bound = nx ? Math.min(sentences[i].stop, nx.start - 0.03) : sentences[i].stop;
+      if (t < bound - SENT_EPS) return i;
+    }
     return Math.max(0, sentences.length - 1);
   }
 
@@ -1385,8 +1446,23 @@
     const s = sentences[sentIdx];
     stopAt = stopping() ? s.stop : null;
     sentenceDone = false;
-    const prevEnd = sentIdx > 0 ? sentences[sentIdx - 1].end : 0;
-    // A touch early, so the first word's attack isn't clipped by the seek.
+    // A touch early, so the first word's attack isn't clipped by the seek —
+    // but never back past where the previous sentence stops. This line has
+    // always meant "do not reach into the sentence before", and it measured
+    // that with `end` because `stop` used to sit 200 ms further back still, so
+    // the two could not be told apart. They can now: on a line-level track a
+    // sentence plays to 30 ms before the next one starts, and a 150 ms pre-roll
+    // reaches straight into its last word. Two things then go wrong at once —
+    // you hear that word again, and the `seeked` this very line fires sends
+    // resync() to findSentenceAt, which draws its boundary at `stop`, hands
+    // back the PREVIOUS sentence and stops playback 90 ms later. Measured on
+    // yhGzXULZkEw: 91 of 202 plays, 0.09 s each. `end` alone no longer says it.
+    const prev = sentIdx > 0 ? sentences[sentIdx - 1] : null;
+    // Clamped by the same bound findSentenceAt draws, not by the raw stop: the
+    // stop may now sit past this sentence's own start, and clamping to that
+    // would refuse to seek back at all.
+    const prevBound = prev && prev.stop != null ? Math.min(prev.stop, s.start - 0.03) : 0;
+    const prevEnd = prev ? Math.max(prev.end, prevBound) : 0;
     const from = Math.min(Math.max(s.start - 0.15, prevEnd), s.start);
     try { video.currentTime = from; } catch (_) {}
     playVideo();
@@ -1435,7 +1511,9 @@
     // where a bleed can still be heard, and they are what tells a boundary
     // placed too tight apart from audio the browser had already queued out.
     const s = sentences[sentIdx];
-    if (s && s.gap != null && s.gap < SENT_GUARD - 0.001) {
+    // Word-level only: elsewhere the gap is negative by design now (the tail is
+    // allowed past the caption boundary), and this would fire on every sentence.
+    if (wordLevel && s && s.gap != null && s.gap < sentGuard() - 0.001) {
       dbg(`sentence ${sentIdx + 1} stopped ${Math.round(s.gap * 1000)} ms before the next word`
         + (s.trimmed ? ', last word cut' : ''));
     }
@@ -3052,19 +3130,30 @@
   function buildPlaybackGroup() {
     const field = el('div', 'ytds-field');
     inpTail = document.createElement('input');
-    inpTail.type = 'number';
-    inpTail.className = 'ytds-input';
+    inpTail.type = 'range';
+    inpTail.className = 'ytds-range';
     inpTail.min = String(TAIL_MIN);
     inpTail.max = String(TAIL_MAX);
-    inpTail.step = '10';
-    inpTail.title = `Milliseconds, ${TAIL_MIN}–${TAIL_MAX}. Default ${DEFAULTS.tailMs}.`;
-    // On `change`, not on every keystroke: `input` fires per digit, so typing
-    // 450 would apply 4, then 45 — three rebuilds and two of them nonsense.
-    // Enter commits without leaving the field, because that is what a number
-    // field is expected to do.
+    inpTail.step = String(TAIL_STEP);
+    inpTail.title = `${TAIL_MIN}–${TAIL_MAX} ms in steps of ${TAIL_STEP}. Default ${DEFAULTS.tailMs}.`;
+    elTailVal = el('span', 'ytds-field-unit ytds-field-val', `${DEFAULTS.tailMs} ms`);
+    // A drag fires `input` on every pixel it crosses and `change` once, on
+    // release. Only the number follows the pixels; applying the value walks all
+    // the sentence stops, and doing that per pixel would rebuild the track a
+    // hundred times to land on one value. Same split the typed field used, for
+    // the same reason — there it was one rebuild per digit.
+    inpTail.addEventListener('input', () => {
+      if (elTailVal) elTailVal.textContent = `${inpTail.value} ms`;
+      paintTail();
+    });
     inpTail.addEventListener('change', commitTail);
-    inpTail.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); commitTail(); } });
-    field.append(inpTail, el('span', 'ytds-field-unit', 'ms'));
+    field.append(inpTail, elTailVal);
+
+    // What the value in the handle will do to THIS video. The same counts have
+    // been in the Advanced log since the setting grew one, and that was the
+    // wrong place for them: the question "did that do anything?" is asked here,
+    // with a hand on the control, not two panels away afterwards.
+    elTailReach = el('div', 'ytds-setting-reach', '');
 
     btnTailReset = mkBtn('ytds-text-btn', 'Return the playback settings to their defaults', () => {
       for (const k of PLAYBACK_KEYS) state[k] = DEFAULTS[k];
@@ -3075,14 +3164,66 @@
     return [
       el('div', 'ytds-setting-label', 'Sentence tail'),
       field,
+      elTailReach,
       el('div', 'ytds-setting-note',
-        `How long to keep playing after the last word ends, in milliseconds. `
-        + `Raise it if endings sound cut off, lower it if the pause drags. `
-        + `${DEFAULTS.tailMs} is the default. It can only spend silence that is `
-        + `there: where the next sentence follows straight on, no value changes `
-        + `the ending — the log in Advanced says when that is what you are hearing.`),
+        `How long to keep playing after the last word ends. Raise it if endings `
+        + `sound cut off, lower it if the pause drags. ${DEFAULTS.tailMs} ms is `
+        + `the default. It spends silence and never a word: where a sentence `
+        + `runs straight into the next, there is none to spend and the ending is `
+        + `the same at every value.`),
       row
     ];
+  }
+
+  // The filled stretch behind the handle, as a percentage of the range. A
+  // ::-webkit-slider-runnable-track cannot see the input's value, so the value
+  // has to be handed to it — and from both places the handle can move: a drag
+  // and Reset playback settings.
+  function paintTail() {
+    if (!inpTail) return;
+    const v = clamp(Number(inpTail.value), TAIL_MIN, TAIL_MAX);
+    inpTail.style.setProperty('--fill', `${((v - TAIL_MIN) / (TAIL_MAX - TAIL_MIN)) * 100}%`);
+  }
+
+  // What this value does to the track that is loaded, measured the only way
+  // that answers the question honestly: against the same track at 0 ms. The
+  // count comes from sentenceStop itself — the one home of that arithmetic —
+  // so it can never drift from what playback actually does.
+  //
+  // `pinned` was the wrong number to show here and is left to the log. It says
+  // "this value wants more than the track can give", which at 0 ms is true of
+  // nothing at all — so a slider at zero would have claimed to move every
+  // sentence on the video.
+  function tailReach() {
+    if (sentences.length < 2) return null;
+    const keep = state.tailMs;
+    const stopsAt = (ms) => {
+      state.tailMs = ms;
+      return sentences.slice(0, -1).map((s, i) => {
+        const u = s.units[s.units.length - 1];
+        const nx = sentences[i + 1];
+        const next = nx.units.length ? nx.units[0] : null;
+        if (!u || !next) return null;
+        const r = sentenceStop(u, next, s.start);
+        return r ? r.stop : null;
+      });
+    };
+    const now = stopsAt(keep), none = stopsAt(0);
+    const full = stopsAt(TAIL_MAX);
+    state.tailMs = keep;
+    // A count of "sentences that moved at all" reads 151 at 100 ms and 151 at
+    // 2000, which is a readout as dead as the field it replaced. What actually
+    // grows with the handle is how much silence the value buys, so that is what
+    // it says — plus how many sentences cannot take the whole of it, which is
+    // the answer to "why does turning it up further do nothing".
+    let n = 0, sum = 0, capped = 0;
+    for (let i = 0; i < now.length; i++) {
+      if (now[i] == null || none[i] == null) continue;
+      n++;
+      sum += now[i] - none[i];
+      if (full[i] != null && now[i] >= full[i] - 0.001) capped++;
+    }
+    return { n, avgMs: n ? Math.round((sum / n) * 1000) : 0, capped };
   }
 
   // An empty or unparseable field means "leave it alone" rather than zero:
@@ -3280,9 +3421,21 @@
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
-    // Never while it is being typed into: rewriting the value under the caret
-    // is how a field fights back at the person filling it in.
+    // Never while it is being dragged: moving the handle under the hand that
+    // holds it is how a control fights back at the person setting it.
     if (inpTail && document.activeElement !== inpTail) inpTail.value = String(state.tailMs);
+    if (elTailVal) elTailVal.textContent = `${state.tailMs} ms`;
+    paintTail();
+    // The answer to "did that do anything", where the doing happens. Silent
+    // before a track is loaded — there is no honest number to give then.
+    if (elTailReach) {
+      const r = tailReach();
+      elTailReach.textContent = !r || !r.n ? ''
+        : r.avgMs < 5
+          ? `On this video every sentence stops as soon as its words do.`
+          : `On this video it adds about ${r.avgMs} ms to the average ending`
+            + (r.capped ? `; ${r.capped} of ${r.n} are already as late as this setting can make them.` : '.');
+    }
     // Nothing to undo, nothing to press: the button says so rather than
     // silently doing nothing, which is how a dead control is usually read.
     if (btnTailReset) btnTailReset.disabled = !PLAYBACK_KEYS.some((k) => state[k] !== DEFAULTS[k]);

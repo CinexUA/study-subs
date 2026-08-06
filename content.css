@@ -1111,6 +1111,59 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   font: 400 calc(1 * var(--u)) / 1 var(--sans);
   color: var(--ink-3);
 }
+/* The value the handle is holding. It sits beside the slider rather than above
+   it because the eye is already there, and it is tabular so the number does not
+   jitter sideways as it crosses 100 → 1000 mid-drag. */
+.ytds-field-val {
+  min-width: calc(4.5 * var(--u));
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+/* The tail slider. Native range inputs arrive wearing the page's clothes, and
+   on a YouTube watch page that is the player's — so track and handle are both
+   drawn here, in the same language as the transport scrubber above. */
+.ytds-range {
+  width: calc(16 * var(--u));
+  height: calc(1.6 * var(--u));
+  background: transparent;
+  -webkit-appearance: none;
+  appearance: none;
+  cursor: pointer;
+}
+/* The stretch behind the handle is filled, the way the transport scrubber
+   fills. Without it a native track is the same grey at 0 as at 2000, and a
+   control that looks identical at both ends of its range is read as one that
+   does nothing — which is exactly the doubt this setting has to answer.
+   `--fill` is set from the value in JS; there is no CSS that can read it. */
+.ytds-range::-webkit-slider-runnable-track {
+  height: calc(.5 * var(--u));
+  border-radius: var(--r-pill);
+  background:
+    linear-gradient(90deg, var(--accent-2), var(--accent)) 0 0 / var(--fill, 0%) 100% no-repeat,
+    var(--bg-sunken);
+  box-shadow: var(--press);
+}
+.ytds-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: calc(1.2 * var(--u));
+  height: calc(1.2 * var(--u));
+  /* Centre on the track: half the track minus half the handle. */
+  margin-top: calc(-.35 * var(--u));
+  border: none;
+  border-radius: 50%;
+  background-image: linear-gradient(90deg, var(--accent-2), var(--accent));
+}
+.ytds-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+/* What the value does to the video that is open. Sits between the control and
+   the explanation: it is a reading, not advice. */
+.ytds-setting-reach {
+  max-width: calc(30 * var(--u));
+  font: 400 calc(.95 * var(--u)) / 1.45 var(--sans);
+  color: var(--ink-2);
+}
+.ytds-setting-reach:empty { display: none; }
 /* Nothing to undo: say so instead of accepting a click that does nothing. */
 .ytds-text-btn[disabled] {
   opacity: .45;

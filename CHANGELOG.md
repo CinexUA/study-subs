@@ -9,7 +9,45 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Changed
+
+- **Sentence tail is a slider now**, 0 to 2000 ms in steps of 100, with the
+  value beside it and the track filling as it moves. It was a typed box, and a
+  typed box gives no sign of having been read: you enter a number, the ending
+  sounds the same, and nothing tells a value that did nothing apart from a field
+  that was never applied.
+- Under the slider, **what the value does to the video you are watching** — how
+  much it adds to the average ending, and how many sentences are already as late
+  as the setting can make them. Those counts existed only in the Advanced log,
+  which is two panels away from the hand on the control. The setting spends
+  silence and never a word, so on a talk where the speaker runs from one
+  sentence into the next there is nothing for it to spend — and now it says so
+  where you are looking, instead of appearing broken.
+
 ### Fixed
+
+- **Sentence tail now reaches the endings it was added for.** On tracks timed
+  one caption line at a time — every hand-written track — a line can hand over
+  to the next one in the middle of the last word, and the setting was not
+  allowed past that handover. Measured on one TED talk: the word *real* sounds
+  until 294.16, the pause between the sentences runs 294.18–294.34, and the
+  caption ends at 293.956 — so playback stopped mid-vowel, heard as "real e…",
+  and every value from 0 to 2000 stopped in the same place. The tail may now
+  spend past a caption boundary on such tracks, which is the only place the
+  ending it was reaching for lives. Turn it up until endings sound whole and
+  down when the next sentence starts bleeding in; both directions now do
+  something. Tracks timed word by word are untouched.
+
+- **Sentences no longer stop inside their own last word.** On tracks whose
+  captions are one line at a time — every hand-written track — the end of a
+  sentence was clipped by about 200 ms, and no value of Sentence tail reached
+  it: "…about turning ideas into something real." was heard as "…something
+  rea…" at 0, at 300 and at 2000 alike. A sentence on such a track now plays to
+  the end of the caption it belongs to. On the talk this was reported from, the
+  worst clip drops from 2.2 s to 30 ms, and 27 more sentences per talk reach
+  their own ending. Tracks with word-by-word timings are untouched: there the
+  next word really does start where the caption says, and the silence before it
+  is still kept.
 
 - **Sentence tail** now honours `0`. The field accepts it and shows it back,
   and every other value between it and the default did something — but `0`
@@ -20,9 +58,9 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 - The log in **⚙ → Advanced** now says what changing the Sentence tail did:
   how many sentence stops moved, and how many could not move because the next
   sentence follows too closely to give up the silence in between. The setting
-  has never been able to play into the next sentence, and on a fast-cut talk
-  that is most of them — the ending sounds the same at 800 ms as at 2000, and
-  until now there was nothing to tell that apart from a field doing nothing.
+  can only ever spend silence that is there, so on those the ending sounds the
+  same at 800 ms as at 2000 — and until now there was nothing to tell that
+  apart from a field doing nothing at all.
 
 ## 1.2.0 — 2026-08-03
 
