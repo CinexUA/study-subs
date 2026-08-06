@@ -7,6 +7,23 @@ in the commit that made it.
 `Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
 A bug introduced and fixed before a release is not listed: nobody ever had it.
 
+## Unreleased
+
+### Fixed
+
+- **Sentence tail** now honours `0`. The field accepts it and shows it back,
+  and every other value between it and the default did something — but `0`
+  alone was read as the default, so the shortest ending the setting offers was
+  the one value you could not get. Turned down to nothing, a sentence now stops
+  where its last word does.
+
+- The log in **⚙ → Advanced** now says what changing the Sentence tail did:
+  how many sentence stops moved, and how many could not move because the next
+  sentence follows too closely to give up the silence in between. The setting
+  has never been able to play into the next sentence, and on a fast-cut talk
+  that is most of them — the ending sounds the same at 800 ms as at 2000, and
+  until now there was nothing to tell that apart from a field doing nothing.
+
 ## 1.2.0 — 2026-08-03
 
 ### Added

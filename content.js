@@ -729,7 +729,11 @@
   // slower than the guess loses the tail of the last word ("freeze" heard as
   // "free") with seconds of silence still to spare. It is now a setting,
   // because the right value is a property of the speaker, not of the code.
-  const tailSec = () => (state.tailMs || 300) / 1000;
+  //
+  // `||` was the wrong test and hid the bottom of the range: TAIL_MIN is 0, so
+  // 0 is a value the field accepts and shows back, and every one of those runs
+  // read it as 300. Typing the smallest tail there is got you the default.
+  const tailSec = () => (Number.isFinite(state.tailMs) ? state.tailMs : DEFAULTS.tailMs) / 1000;
   const SENT_GUARD = 0.2;   // silence we ask for before the next word's onset
   // …and the silence we never give up, whatever the floor below would rather
   // have. The floor used to sit outside the clamp and quietly overrule the
@@ -825,7 +829,14 @@
     // and silence wins: the last word is then cut short of its own onset.
     // At that distance it is a syllable fragment on an ASR timestamp, but
     // it is a real cost and the log names it.
-    return { stop, gap: next.t - stop, trimmed: stop < u.t };
+    //
+    // `pinned` is for the log alone, and it is the answer to the only question
+    // the setting raises in use: did turning it do anything here? The tail may
+    // spend the silence before the next word and no more, so on a sentence the
+    // next one follows straight into, every value produces the same boundary —
+    // which reads as a dead field unless something says otherwise.
+    const pinned = spoken + tail > next.t - SENT_GUARD;
+    return { stop, gap: next.t - stop, trimmed: stop < u.t, pinned };
   }
 
   // Recompute only the pause boundaries, in place. Everything the tail cannot
@@ -836,14 +847,26 @@
   // input this needs is already in `sentences`.
   function restop() {
     if (!sentences.length) return;
+    let moved = 0, pinned = 0, n = 0;
     for (let i = 0; i < sentences.length; i++) {
       const s = sentences[i], nextS = sentences[i + 1];
       const u = s.units[s.units.length - 1];
       const next = nextS && nextS.units.length ? nextS.units[0] : null;
       if (!u || !next) { s.stop = s.end; s.gap = null; s.trimmed = false; continue; }
+      const was = s.stop;
       const r = sentenceStop(u, next, s.start);
-      if (r) { s.stop = r.stop; s.gap = r.gap; s.trimmed = r.trimmed; }
+      if (r) {
+        s.stop = r.stop; s.gap = r.gap; s.trimmed = r.trimmed;
+        n++;
+        if (Math.abs(r.stop - was) > 0.005) moved++;
+        if (r.pinned) pinned++;
+      }
     }
+    // Say what the change actually did. Without this the field is unfalsifiable
+    // from the couch: you raise it, the ending sounds the same, and there is no
+    // way to tell a value too small from a track with no silence to give.
+    dbg(`sentence tail ${state.tailMs} ms: ${moved} of ${n} stops moved`
+      + `, ${pinned} pinned by the ${Math.round(SENT_GUARD * 1000)} ms of silence owed to the next word`);
     // Re-arm against the new boundary WITHOUT armStudy(): that would clear
     // sentenceDone, and the sentence you just heard cut off is exactly the one
     // you want ▶ to play again after raising the value.
@@ -2988,9 +3011,11 @@
       el('div', 'ytds-setting-label', 'Sentence tail'),
       field,
       el('div', 'ytds-setting-note',
-        `How long to keep playing after the last word is estimated to end, in milliseconds. `
+        `How long to keep playing after the last word ends, in milliseconds. `
         + `Raise it if endings sound cut off, lower it if the pause drags. `
-        + `${DEFAULTS.tailMs} is the default.`),
+        + `${DEFAULTS.tailMs} is the default. It can only spend silence that is `
+        + `there: where the next sentence follows straight on, no value changes `
+        + `the ending — the log in Advanced says when that is what you are hearing.`),
       row
     ];
   }
