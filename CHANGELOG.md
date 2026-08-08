@@ -26,6 +26,13 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- **The line about who typed the subtitles is no longer read as part of the
+  video.** A TED track opens with "Transcriber: … Reviewer: …" timed at zero,
+  which put those names on screen over the opening titles, made them the first
+  sentence of the video, and gave them the first block of the transcript. They
+  are gone from all three. Recognised by shape rather than by the words, so the
+  same line in a translated track goes with it.
+
 - **Sentence tail now reaches the endings it was added for.** On tracks timed
   one caption line at a time — every hand-written track — a line can hand over
   to the next one in the middle of the last word, and the setting was not

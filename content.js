@@ -1853,6 +1853,27 @@
   const CUE_ROUND_ONLY_RE = /^\s*\(([^)]*)\)\s*$/;
   const CUE_ROUND_MAX_WORDS = 2;
 
+  // A track can open with a line about the TRACK rather than about the video:
+  // TED's "Transcriber: … Reviewer: …" sits at 0 with a window over the opening
+  // titles, seconds before anyone speaks. It was cheap to ignore while it
+  // simply sat there; once the reveal started typing it out over the intro
+  // music it became the first thing this extension does on such a video.
+  //
+  // Recognised by SHAPE, never by the words. The translated track carries the
+  // same line translated ("Транскрибатор: … Рецензент: …"), and a list of
+  // labels per language is a list that is always one language short — while the
+  // shape survives translation untouched: two or more colons, no sentence
+  // ending, short. And only at the HEAD of the track, where that shape means
+  // nothing else; in the middle of a talk it is a spoken line with a colon in
+  // it, and those stay.
+  const CREDIT_MAX_LEN = 90;
+  const CREDIT_END_RE = /[.!?…]/;
+  function looksLikeCredits(text) {
+    const s = String(text == null ? '' : text).trim();
+    if (!s || s.length > CREDIT_MAX_LEN || CREDIT_END_RE.test(s)) return false;
+    return (s.match(/:/g) || []).length >= 2;
+  }
+
   function stripCues(text) {
     const s = String(text == null ? '' : text);
     const round = CUE_ROUND_ONLY_RE.exec(s);
@@ -1872,6 +1893,10 @@
     for (const u of units) {
       const text = stripCues(u.text);
       if (!textLen(text)) continue;
+      // "Nothing has survived yet" rather than "index 0": a music cue or a
+      // [applause] can sit in front of the credits, and the head of the track
+      // is where the credits are — not necessarily the first event of it.
+      if (!out.length && looksLikeCredits(text)) continue;
       out.push(text === u.text ? u : { ...u, text });
     }
     return out;
