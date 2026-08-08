@@ -2595,10 +2595,10 @@
     }
     elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
     elStage.classList.toggle('ytds-pointable', !!pairs);
-    elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
     // Only where there is a CHOICE of phrases: on a sentence that is one
     // target the line says "point at a phrase" and there is only the whole of
-    // it to point at, which teaches the wrong thing on first sight.
+    // it to point at, which teaches the wrong thing on first sight. The MARK
+    // is no longer gated that way — see content.css — but the words are.
     if (pairs && pairs.count > 1) hintOnce();
   }
 
@@ -2617,7 +2617,6 @@
       ? lineItems(uaLines, ua, fresh, pairs ? -1 : uaW, pairs && pairs.uaOf, state.showUa) : []);
     elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
     elStage.classList.toggle('ytds-pointable', !!pairs);
-    elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
     if (pairs && pairs.count > 1) hintOnce();
   }
 

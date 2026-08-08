@@ -424,14 +424,14 @@
   box-decoration-break: clone;
 }
 .ytds-pointable .ytds-chunk.ytds-lit { background-color: var(--bg-hover); }
-/* A sentence with nothing finer to say is one target — and then NEITHER side is
-   washed. Marking a whole two-line sentence says nothing that the cursor has
-   not already said, and doing it to one side only reads as a bug: the answer
-   lights up while the thing being pointed at does not.
-   Only the background goes. With the translation off, the phrase still APPEARS
-   (that is `visibility`, further down) — which is the case where a single
-   target genuinely has something to show. */
-.ytds-one-target .ytds-chunk.ytds-lit { background-color: transparent; }
+/* A sentence with nothing finer inside it is one target, and it marks like any
+   other — `.ytds-one-target` used to sit here and wash the mark away on both
+   sides, on the argument that marking a whole sentence says nothing the cursor
+   has not already said. That was true and beside the point. Nothing on screen
+   changed, and no reader can tell "there is nothing finer here" from "this is
+   broken" — the answer was silence, and silence reads as a fault. It costs one
+   hover to say "the piece you are pointing at is the whole of it, and there it
+   is below", and that is an answer. */
 /* Only the translation steps back, never the source. The English line is the
    one being read; dimming four fifths of it every time the cursor crosses it
    would fight the reading instead of helping it. */
@@ -625,10 +625,8 @@
 /* Pointing at a phrase, over video. The source line never dims its neighbours
    (dimming four fifths of what is being read fights the reading), so its only
    signal is the background — and --bg-hover is 7% of a theme's ink, mixed for
-   pale paper. On the scrim over a dark frame it is simply not there.
-   `:not(.ytds-one-target)` keeps the rule above intact: a sentence with a
-   single phrase still marks neither side. */
-.ytds-video .ytds-pointable:not(.ytds-one-target) .ytds-chunk.ytds-lit {
+   pale paper. On the scrim over a dark frame it is simply not there. */
+.ytds-video .ytds-pointable .ytds-chunk.ytds-lit {
   background-color: var(--vid-lit);
 }
 /* Subtitles go to the bottom of the picture, the way subtitles do. The reading
