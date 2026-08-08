@@ -6,7 +6,7 @@
   'use strict';
 
   const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300 };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300, reveal: true };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -173,10 +173,22 @@
   // derivative of the track, costs microseconds, and keeping it on disk would
   // be one more thing that can drift apart from a re-parse.
   let chunkCache = {};
+  // The same, per free-reading LINE. A separate cache because a line is not a
+  // sentence: it may start mid-sentence or hold two short ones, so the pairing
+  // of a line is its own answer and the two can never be looked up in one map.
+  let lineChunkCache = {};
   let litChunk = null;   // the target currently pointed at, or null
   // Does this track carry a time per WORD, or only per caption line? The
   // word-by-word reveal is only honest on the first kind; see wordLevelTrack().
   let wordLevel = true;
+  // …and whether the reader wants a reveal at all. One gate for the whole
+  // feature, asked by both halves of it: the walk over recorded word onsets
+  // (word-level tracks) and the visual one placed inside each caption
+  // (line-level tracks). Off means every line and every sentence is there in
+  // full the moment it starts — what the reader did before any of this existed,
+  // and what someone who reads ahead of the speaker wants back.
+  const wordReveal = () => wordLevel && state.reveal !== false;
+  const softReveal = () => !wordLevel && state.reveal !== false;
   let sentIdx = 0;
   let stopAt = null;
   let sentenceDone = false;  // the current sentence played out and we stopped at its end
@@ -667,7 +679,16 @@
       if (cur && cur.units.length) {
         cur.full = joinUnits(cur.units);
         const last = cur.units[cur.units.length - 1];
-        const e = last.end != null ? Math.min(last.end, last.t + 0.7) : last.t + estSpeechDur(last.text);
+        // Where the line's speech ends: the last caption's own display end. It
+        // used to be capped at `last.t + 0.7` — the longest a WORD is, while on
+        // a line-level track this unit is a whole caption line (the mistake A9
+        // found in the sentence stop, left standing here because nothing read
+        // this value). The reveal reads it now, and the letter-count estimate
+        // is no better a ceiling: it assumes a flat 13.3 letters a second, and
+        // the tracks measured run 8.3 to 14.0 (p10..p90). Any estimate here is
+        // the same speaker at the same speed all the way through, which is the
+        // one thing the reveal must not be.
+        const e = last.end != null ? last.end : last.t + estSpeechDur(last.text);
         cur.end = Math.max(last.t, e);
         lines.push(cur);
       }
@@ -698,7 +719,7 @@
       else hi = m - 1;
     }
     if (idx < 0) return { idx: -1, n: 0 };
-    if (!wordLevel) return { idx, n: lines[idx].units.length };  // same rule as revealCount
+    if (!wordReveal()) return { idx, n: lines[idx].units.length };  // same rule as revealCount
     let n = 0;
     for (const u of lines[idx].units) { if (u.t <= t + LEAD) n++; else break; }
     return { idx, n: Math.max(1, n) };
@@ -1337,6 +1358,24 @@
     return pairs;
   }
 
+  // And the same for a free-reading line. The pairing is built between the two
+  // TEXTS the reader is looking at, so a line gets its own answer rather than a
+  // slice of the sentence's: a line that starts mid-sentence would otherwise be
+  // handed word indices counted from a first word that is not on screen.
+  // The lines themselves are already a pair — spreadToLines gave this line the
+  // part of the translation that belongs to it — so the solver only has to
+  // divide what is in front of it.
+  function linePairs(i) {
+    if (i < 0 || i >= enLines.length) return null;
+    if (Object.prototype.hasOwnProperty.call(lineChunkCache, i)) return lineChunkCache[i];
+    const uaL = uaLines[i];
+    const pairs = uaL && uaL.units.length
+      ? buildChunkPairs(enLines[i].full, uaL.full)
+      : null;
+    lineChunkCache[i] = pairs;
+    return pairs;
+  }
+
   // Free reading shows lines, not sentences, and a line may start mid-sentence
   // (too long, too slow) or hold two short ones. So the translation is aligned
   // once, per sentence, and the lines then take their share of it: a line gets
@@ -1929,6 +1968,11 @@
     const uaSents = sameLang ? sentences : splitIntoSentences(uaUnits);
     uaSentences = sameLang ? sentences : alignCovered(uaSents, sentences);
     uaLines = sameLang ? enLines : spreadToLines(uaSentences, sentences, enLines);
+    // Both pairings describe the translation that was just replaced. loadCaptions
+    // clears them too, but it is not the only way here: an interception can
+    // rebuild once more inside the same load, and a pairing kept across that
+    // would answer for a track nobody is reading any more.
+    chunkCache = {}; lineChunkCache = {};
     sentIdx = 0; stopAt = null; sentenceDone = false;
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
@@ -2049,7 +2093,8 @@
     loadGen++;
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     captionsReady = false;
-    sentences = []; uaSentences = []; chunkCache = {}; sentIdx = 0; stopAt = null; sentenceDone = false;
+    sentences = []; uaSentences = []; chunkCache = {}; lineChunkCache = {};
+    sentIdx = 0; stopAt = null; sentenceDone = false;
     // Without this the notches survive into the next video, and two videos of
     // the same length with the same sentence count would never redraw them.
     ticksDur = 0; ticksLen = -1;
@@ -2341,11 +2386,20 @@
     // this EN line, revealed as far as the EN line itself has got.
     const enLen = en.idx >= 0 ? enLines[en.idx].units.length : 0;
     const ua = revealAligned(uaLines, en.idx, enLen ? en.n / enLen : 0);
-    const sig = `${en.idx}:${en.n}|${ua.idx}:${ua.n}|${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}`;
+    // The soft reveal, and the same two reasons study mode has for putting its
+    // counts in the signature: on a line-level track `en.n` never moves inside
+    // a line, and the frame that stops looks identical to the one before it —
+    // so without them the gate would eat both the typing and the phrases.
+    const enL = en.idx >= 0 ? enLines[en.idx] : null;
+    const frac = lineFrac(enL, t);
+    const enW = lineWords(enL, frac);
+    const uaW = lineWords(ua.idx >= 0 ? uaLines[ua.idx] : null, frac);
+    const sig = `${en.idx}:${en.n}:${enW}|${ua.idx}:${ua.n}:${uaW}|`
+      + `${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
     if (sig === lastSig) return;
     const fresh = en.idx !== lastIdx;
     lastSig = sig; lastIdx = en.idx;
-    renderLines(en, ua, fresh);
+    renderLines(en, ua, fresh, enW, uaW);
     // Keep the counter (and the sentence the shadowing row would resume from)
     // honest even while we are not driving playback.
     if (fresh && sentences.length) { sentIdx = findSentenceAt(t); updateCounter(); syncTranscript(); }
@@ -2363,7 +2417,7 @@
   // repeat), so on such a track it simply appears whole.
   function revealCount(s, t) {
     if (!s) return 0;
-    if (!wordLevel) return s.units.length;
+    if (!wordReveal()) return s.units.length;
     let n = 0;
     for (const u of s.units) { if (u.t <= t + LEAD) n++; else break; }
     return Math.max(1, n);
@@ -2378,7 +2432,7 @@
     // The translation follows the source, including the decision above: a
     // half-shown translation under a whole sentence is the same fragment
     // ("…можуть зойкнути," with nothing to finish it) read twice.
-    if (!wordLevel) return uaS.units.length;
+    if (!wordReveal()) return uaS.units.length;
     const span = ((enS.stop != null ? enS.stop : enS.end) - enS.start) || 1;
     const p = clamp((t - enS.start) / span, 0, 1);
     return Math.max(1, Math.ceil(p * uaS.units.length));
@@ -2404,12 +2458,62 @@
     return s._text;
   }
 
+  // A window of zero or less is not a reveal to spread over, and the answer
+  // there is "all of it", never "none of it": a line whose end has been clamped
+  // back to its own start (captions that overlap) would otherwise stay
+  // invisible for as long as it is on screen — the text simply gone, with
+  // nothing on screen to say why.
+  function softFrac(start, end, t) {
+    const span = end - start;
+    if (!(span > 0)) return 1;
+    return clamp((t + LEAD - start) / span, 0, 1);
+  }
+
+  // Where a caption unit's own reveal ends. Its display window, never reaching
+  // into the next unit — and never past the end handed in (the line's own end,
+  // or the sentence's stop), so the text is always out before playback is.
+  // Deliberately NOT the letter-count estimate: that is where the speaker
+  // stopped being a person and became 13.3 letters a second.
+  function unitRevealEnd(u, next, hardEnd) {
+    const own = u.end != null ? u.end : (next ? next.t : u.t + estSpeechDur(u.text));
+    const lid = next ? next.t : (hardEnd != null ? hardEnd : Infinity);
+    return Math.max(u.t, Math.min(own, lid));
+  }
+
+  // How far into a run of units we are at time t, in characters — the number
+  // wordsShown wants.
+  //
+  // Unit by unit, and that is the whole point. A line-level track has no time
+  // per word, but it has one per CAPTION, and between two captions it has
+  // silence — both of them real, recorded measurements of a person speaking.
+  // Spreading the whole line (or the whole sentence) evenly across its span
+  // threw all of that away and typed everything at one rate, which is what a
+  // speaker never does: measured on the two TED tracks, 107 of 165 lines hold
+  // two or more captions and 39 of the pauses INSIDE those lines run over half
+  // a second — every one of them typed straight through.
+  //
+  // Inside a single caption there is still nothing to go on, so those words are
+  // still spread by character count. That is the floor of what the data knows,
+  // and it is about seven words wide rather than a whole sentence.
+  const charLen = (s) => String(s == null ? '' : s).replace(/\s+/g, '').length;
+  function unitsFrac(units, t, hardEnd) {
+    let total = 0;
+    for (const u of units) total += charLen(u.text);
+    if (!total) return 0;
+    let acc = 0;
+    for (let i = 0; i < units.length; i++) {
+      const u = units[i];
+      const f = softFrac(u.t, unitRevealEnd(u, units[i + 1], hardEnd), t);
+      acc += charLen(u.text) * f;
+      if (f < 1) break;   // nothing later than an unfinished caption is spoken yet
+    }
+    return acc / total;
+  }
+
   function sentenceFrac(s, t) {
-    if (!s) return 0;
-    // Against `stop`, like the translation reveal: the last word then lands
-    // exactly as playback pauses, instead of a beat after it.
-    const span = ((s.stop != null ? s.stop : s.end) - s.start) || 1;
-    return clamp((t + LEAD - s.start) / span, 0, 1);
+    // Against `stop`, like the translation reveal: the sentence is out by the
+    // time playback pauses, rather than a beat after it.
+    return s ? unitsFrac(s.units, t, s.stop != null ? s.stop : s.end) : 0;
   }
 
   // By characters rather than by word count, so "extraordinarily" is given more
@@ -2427,10 +2531,19 @@
 
   // −1 means "not applicable": a word-level track reveals by real onsets, and
   // the value also sits in the frame signature, where −1 keeps it constant.
-  function softCount(s, t) { return !s || wordLevel ? -1 : wordsShown(sentText(s), sentenceFrac(s, t)); }
+  function softCount(s, t) { return s && softReveal() ? wordsShown(sentText(s), sentenceFrac(s, t)) : -1; }
   function softCountUa(enS, uaS, t) {
-    return !uaS || !enS || wordLevel ? -1 : wordsShown(sentText(uaS), sentenceFrac(enS, t));
+    return uaS && enS && softReveal() ? wordsShown(sentText(uaS), sentenceFrac(enS, t)) : -1;
   }
+
+  // The same reveal for free reading, where the unit of the stage is a LINE.
+  // A line-level track is the reason this exists in both modes: there a caption
+  // unit IS the whole line, so the reveal by onsets hands the line over in one
+  // piece and the text simply appears. `frac` comes from the EN line for both
+  // zones — the translation follows the source here exactly as it does in study
+  // mode, and for the same reason (revealAligned).
+  function lineFrac(l, t) { return l && softReveal() ? unitsFrac(l.units, t, l.end) : 0; }
+  function lineWords(l, frac) { return l && softReveal() ? wordsShown(l.full, frac) : -1; }
 
   // Pointing at a phrase needs the sentence in pieces, and it is only offered
   // while playback is stopped ON A WHOLE sentence. Two reasons, and the second
@@ -2440,6 +2553,16 @@
   // there too — which is why this asks the reveal rather than `sentenceDone`.)
   function pointable(enS, enN) {
     return !!(video && video.paused && enS && enN >= enS.units.length && !adNow());
+  }
+
+  // Free reading asks the same question about a line. The reveal is the gate
+  // here too, not the pause alone: half a line paired is a different pairing,
+  // and on a line-level track the line is whole from its first frame anyway —
+  // which is why an ordinary pause is enough there and a word-level track waits
+  // for the last word to be spoken.
+  function pointableLine(sel) {
+    if (!video || !video.paused || adNow() || sel.idx < 0 || sel.idx >= enLines.length) return false;
+    return sel.n >= enLines[sel.idx].units.length;
   }
 
   // Two fixed zones split by the hairline: EN sits just ABOVE it (grows
@@ -2479,24 +2602,38 @@
     if (pairs && pairs.count > 1) hintOnce();
   }
 
-  function renderLines(en, ua, fresh) {
+  function renderLines(en, ua, fresh, enW, uaW) {
     if (!elZoneEn) return;
     hideNote();
-    paint(elZoneEn, 'ytds-en', state.showEn ? lineItems(enLines, en, fresh) : []);
-    paint(elZoneUa, 'ytds-ua', state.showUa ? lineItems(uaLines, ua, fresh) : []);
-    // Free reading shows lines, and lines are aligned by a different route
-    // (spreadToLines), so there are no phrases to point at here. Both marks
-    // are dropped rather than left over from the mode before.
-    elZoneUa.classList.remove('ytds-ua-off');
-    elStage.classList.remove('ytds-pointable');
+    const pairs = pointableLine(en) ? linePairs(en.idx) : null;
+    paint(elZoneEn, 'ytds-en', state.showEn
+      ? lineItems(enLines, en, fresh, pairs ? -1 : enW, pairs && pairs.enOf, true) : []);
+    // As in study mode, the translation zone is painted for the pointing even
+    // with the UK chip off — but then it holds NOTHING except the phrase asked
+    // for: the previous line carries no phrases, so it would be a whole line of
+    // translation left on screen by a feature the chip is supposed to have
+    // turned off.
+    paint(elZoneUa, 'ytds-ua', (state.showUa || pairs)
+      ? lineItems(uaLines, ua, fresh, pairs ? -1 : uaW, pairs && pairs.uaOf, state.showUa) : []);
+    elZoneUa.classList.toggle('ytds-ua-off', !state.showUa);
+    elStage.classList.toggle('ytds-pointable', !!pairs);
+    elStage.classList.toggle('ytds-one-target', !!pairs && pairs.count === 1);
+    if (pairs && pairs.count > 1) hintOnce();
   }
 
   // The previous line (dimmed) plus the current one, revealed word by word.
-  function lineItems(lines, sel, fresh) {
-    if (sel.idx < 0) return [];
+  // Which of the three ways the current line is drawn is a ladder, and the
+  // order matters: phrases win when they are offered (playback has stopped and
+  // the whole line is out), then the soft reveal on a line-level track, and
+  // only then the plain slice a word-level track reveals by real onsets.
+  function lineItems(lines, sel, fresh, soft, chunks, withPrev) {
+    if (sel.idx < 0 || sel.idx >= lines.length) return [];
     const items = [];
-    if (sel.idx > 0) items.push({ text: lines[sel.idx - 1].full, dim: true });
-    items.push({ text: joinUnits(lines[sel.idx].units.slice(0, sel.n)), fresh });
+    if (withPrev && sel.idx > 0) items.push({ text: lines[sel.idx - 1].full, dim: true });
+    const l = lines[sel.idx];
+    if (chunks) items.push({ text: l.full, fresh, chunks });
+    else if (soft != null && soft >= 0) items.push({ text: l.full, fresh, words: soft });
+    else items.push({ text: joinUnits(l.units.slice(0, sel.n)), fresh });
     return items;
   }
 
@@ -3200,6 +3337,34 @@
     ];
   }
 
+  // The reveal, as a control. It belongs in the drawer rather than beside the
+  // mode pills for the reason written over buildDrawer: this is set once, to
+  // taste, and never touched again while watching — and there is a taste to
+  // settle, because the reveal answers "hear it first, read it after" while
+  // reading ahead of the speaker is a perfectly good way to use subtitles.
+  // One button, lit when on: the same language the mode pills speak.
+  function buildTextGroup() {
+    const row = el('div', 'ytds-btn-row');
+    const btn = mkBtn('ytds-pill ytds-pill-text',
+      'Let the words arrive as they are spoken, instead of a whole line at once',
+      () => {
+        toggleKey('reveal');
+        // In the log because this is a setting whose effect is easy to mistake
+        // for a track that simply has no word times — the two look identical.
+        dbg(`reveal ${state.reveal ? 'on' : 'off'} (${wordLevel ? 'word-level' : 'line-level'} track)`);
+      }, icon('study'), el('span', null, 'Word by word'));
+    btn.dataset.key = 'reveal';   // syncUi lights every [data-key] from state
+    row.appendChild(btn);
+    return [
+      el('div', 'ytds-setting-label', 'Text appears'),
+      row,
+      el('div', 'ytds-setting-note',
+        `Words arrive as the speaker says them, and a pause in the talk is a `
+        + `pause on screen. Turn it off to read ahead: each line is then there `
+        + `in full the moment it starts, the way it used to be.`)
+    ];
+  }
+
   // The filled stretch behind the handle, as a percentage of the range. A
   // ::-webkit-slider-runnable-track cannot see the input's value, so the value
   // has to be handed to it — and from both places the handle can move: a drag
@@ -3388,6 +3553,8 @@
     body.append(
       group('Playback', 'pause'),
       ...buildPlaybackGroup(),
+      group('Text', 'study'),
+      ...buildTextGroup(),
       group('Advanced', 'console'),
       ...(tag ? [el('div', 'ytds-ver', tag)] : []),
       elStatus,

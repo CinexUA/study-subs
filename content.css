@@ -437,6 +437,12 @@
    would fight the reading instead of helping it. */
 .ytds-pointing .ytds-zone-ua .ytds-chunk { opacity: .28; }
 .ytds-pointing .ytds-zone-ua .ytds-chunk.ytds-lit { opacity: 1; }
+/* Free reading keeps the previous line on screen, and it carries no phrases —
+   so at .4 it would come out BRIGHTER than the washed line the cursor is
+   actually working on, and the eye would go to the wrong one. It steps back
+   with them. Study mode never meets this rule: there is only ever one block
+   there. */
+.ytds-pointing .ytds-zone-ua .ytds-block:not(.ytds-active) { opacity: .12; }
 
 /* Translation off: the same thing, one intensity further — the rest is not
    dimmed but gone, and a phrase appears alone when asked for.

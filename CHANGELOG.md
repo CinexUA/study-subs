@@ -9,6 +9,31 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ## Unreleased
 
+### Added
+
+- **The text types itself out as it is spoken** on tracks that carry a time for
+  each caption line rather than each word — which is every hand-made track. It
+  used to arrive a whole line at a time. Both modes do it now: the sentence in
+  study mode, the line in free reading.
+  The pace comes from each caption's own time, so it follows the speaker, and a
+  pause in the talk is a pause on screen. Inside a single caption, where the
+  track knows nothing finer, the words are spread by length — about seven words
+  wide, not a whole sentence.
+  The text is drawn in full from the first frame and the unspoken words are
+  simply invisible, so nothing on screen ever moves: a word appears, it does not
+  push. Tracks timed word by word have real times for every word and are
+  unchanged.
+- **⚙ → Text → Word by word** turns that off. It is on to begin with; switch it
+  off and every line is there in full the moment it starts, the way it was
+  before — reading ahead of the speaker is a perfectly good way to use
+  subtitles, and on a track timed word by word this is also how to stop waiting
+  for the end of a sentence you can already read. The choice is remembered.
+- **Pause in free reading and you can point at a phrase** to see which part of
+  the translation belongs to it. It is the same pointing study mode has, on the
+  line you stopped at. Nothing is marked until the cursor is on it. With the
+  translation switched off, the phrase you point at is the only thing that
+  appears, and it appears where it stands in the line.
+
 ### Changed
 
 - **Sentence tail is a slider now**, 0 to 2000 ms in steps of 100, with the
