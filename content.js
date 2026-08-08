@@ -1333,6 +1333,35 @@
       groups[1].en = groups[0].en.concat(groups[1].en);
       groups.shift();
     }
+
+    // A translated phrase is never DIVIDED between two targets. When one
+    // translated phrase answers for several English ones, alignSentences hands
+    // each of them a share of it cut by character count — and a character count
+    // is arithmetic, not a language. Measured on a real pair of tracks
+    // (yhGzXULZkEw, 202 sentences): 9 of the 96 sentences with phrases had a
+    // translated phrase cut this way, and the cuts were the worst answers in
+    // the whole video — "I mentor," was answered with "працюю", the first half
+    // of "працюю наставником", because 9 characters of English is 20% of what
+    // those two phrases share.
+    //
+    // The English phrases go back together instead. The answer is coarser
+    // ("I mentor, and I do that in my spare time." → the whole of "працюю
+    // наставником і роблю це у вільний час.") and it is right, which is the
+    // trade this whole feature is built on. It can only ever fire where the
+    // cut happened, so a pairing that fell on commas cannot be touched by it —
+    // measured: 10 targets fewer on that video, and not one sentence lost its
+    // phrases altogether.
+    const chunkOf = [];
+    uaC.forEach((c, ci) => { for (const w of c.units) chunkOf[w.i] = ci; });
+    for (let i = 0; i + 1 < groups.length;) {
+      const a = groups[i].ua, b = groups[i + 1].ua;
+      if (a.length && b.length && chunkOf[a[a.length - 1]] === chunkOf[b[0]]) {
+        groups[i].en = groups[i].en.concat(groups[i + 1].en);
+        groups[i].ua = a.concat(b);
+        groups.splice(i + 1, 1);   // the same phrase may be shared by three
+      } else i++;
+    }
+
     if (groups.length < 2) return wholeAsOne(enText, uaText);
 
     // Word index -> target, for both sides, which is all the renderer needs: it
