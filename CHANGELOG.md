@@ -7,7 +7,7 @@ in the commit that made it.
 `Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
 A bug introduced and fixed before a release is not listed: nobody ever had it.
 
-## Unreleased
+## 1.3.0 — 2026-08-09
 
 ### Added
 
