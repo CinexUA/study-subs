@@ -11,6 +11,25 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Added
 
+- **Video** — a new mode in the top bar that keeps the picture and puts the text
+  over it, instead of the reading page covering the player. The video is handed
+  a narrower box and re-fits itself to it, so nothing is cropped, and the
+  player's own controls step aside so there are not two of them on one screen —
+  except during an ad, where Skip Ad lives. Leaving the mode gives the player
+  back exactly as it was.
+- **Transcript** — a column beside the reader listing every sentence of the
+  video, with its translation under it. The unit is the sentence playback stops
+  at, not a caption line, so it agrees with what the reader is doing; YouTube's
+  own transcript already lists lines. The current sentence keeps itself in view
+  and clicking any of them plays from its start. Scrolling by hand hands the
+  list over, and **Follow** takes it back. On a video long enough that the list
+  takes a moment to build, the button says so while it works.
+- **Two smaller text sizes.** The old smallest was sized for a page of text; over
+  a picture the same size covers the film it is supposed to caption.
+- **The reader says where YouTube's translation ends.** On long videos the
+  translation can simply stop while the source runs on. Past that point the
+  bottom line used to be empty, which reads as a broken extension rather than as
+  an answer; it now gives the time the translation reaches.
 - **The text types itself out as it is spoken** on tracks that carry a time for
   each caption line rather than each word — which is every hand-made track. It
   used to arrive a whole line at a time. Both modes do it now: the sentence in
@@ -56,6 +75,28 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
   where you are looking, instead of appearing broken.
 
 ### Fixed
+
+- **On a long video the translation no longer sits under the wrong sentence.**
+  On a four-hour lesson every translated line was a different sentence from the
+  one above it — connected Ukrainian text running across English about something
+  else entirely. The two tracks are the same audio on one clock, and that is
+  what pairs them now; before, they were paired by counting sentences from the
+  start, which drifts further the longer the video runs and cannot recover.
+  Videos short enough that this never went wrong are paired exactly as before.
+
+- **Choosing a language that had not been loaded before no longer empties the
+  bottom line.** With one translation already on disk, switching to another
+  could leave nothing under the source text while the log called the load a
+  success: only the source was checked, and the source came from disk. Both
+  halves are checked now, and a translation that came back empty is retried
+  rather than remembered.
+
+- **A slow speaker no longer loses the end of every sentence.** Study mode
+  stopped at the point where the words were *estimated* to end — a fixed rate of
+  letters per second — even on tracks that record where the line actually
+  finishes. Anyone speaking slower than that estimate was cut off by the
+  difference: on one talk 86 sentences ended inside their own last word, one of
+  them by 1.3 seconds. The recorded end is now believed where it exists.
 
 - **The line about who typed the subtitles is no longer read as part of the
   video.** A TED track opens with "Transcriber: … Reviewer: …" timed at zero,
