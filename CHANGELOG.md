@@ -36,6 +36,12 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Changed
 
+- **Free reading shows one line at a time.** The line that had just gone by used
+  to stay above the current one, half-lit; it is gone unless you ask for it back
+  at **⚙ → Text → Previous line**, where it works exactly as it did. Two lines of
+  each language on screen is a lot to carry when only one of them is being
+  spoken, so it is the reader's call now rather than the only way free reading
+  looks. Study mode never showed it and is unchanged. The choice is remembered.
 - **Sentence tail is a slider now**, 0 to 2000 ms in steps of 100, with the
   value beside it and the track filling as it moves. It was a typed box, and a
   typed box gives no sign of having been read: you enter a number, the ending

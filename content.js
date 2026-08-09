@@ -6,7 +6,7 @@
   'use strict';
 
   const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300, reveal: true };
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300, reveal: true, prevLine: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -2408,8 +2408,8 @@
       return;
     }
 
-    // Free reading: the rolling transcript — previous line dimmed above the
-    // current one, which fills in word by word.
+    // Free reading: the rolling transcript — the current line filling in word
+    // by word, with the previous one dimmed above it if the reader asked for it.
     const en = pickLine(enLines, t);
     // The translation is not searched for: it is the bucket that belongs to
     // this EN line, revealed as far as the EN line itself has got.
@@ -2649,7 +2649,10 @@
     if (pairs && pairs.count > 1) hintOnce();
   }
 
-  // The previous line (dimmed) plus the current one, revealed word by word.
+  // The current line, revealed word by word — with the previous one dimmed
+  // above it when the setting asks for it. `withPrev` is the ZONE's answer
+  // (the translation zone withholds it while pointing with the chip off);
+  // state.prevLine is the reader's, and both have to say yes.
   // Which of the three ways the current line is drawn is a ladder, and the
   // order matters: phrases win when they are offered (playback has stopped and
   // the whole line is out), then the soft reveal on a line-level track, and
@@ -2657,7 +2660,7 @@
   function lineItems(lines, sel, fresh, soft, chunks, withPrev) {
     if (sel.idx < 0 || sel.idx >= lines.length) return [];
     const items = [];
-    if (withPrev && sel.idx > 0) items.push({ text: lines[sel.idx - 1].full, dim: true });
+    if (withPrev && state.prevLine && sel.idx > 0) items.push({ text: lines[sel.idx - 1].full, dim: true });
     const l = lines[sel.idx];
     if (chunks) items.push({ text: l.full, fresh, chunks });
     else if (soft != null && soft >= 0) items.push({ text: l.full, fresh, words: soft });
@@ -3383,13 +3386,32 @@
       }, icon('study'), el('span', null, 'Word by word'));
     btn.dataset.key = 'reveal';   // syncUi lights every [data-key] from state
     row.appendChild(btn);
+
+    // The line that has just gone by, kept above the current one at 40%. It
+    // shipped as the only way free reading ever looked; off by default now,
+    // because the half-lit copy of a line you have already read is one more
+    // thing on screen for everyone who does not want it back.
+    const prevRow = el('div', 'ytds-btn-row');
+    const btnPrev = mkBtn('ytds-pill ytds-pill-text',
+      'Keep the line that just went by on screen, dimmed, above the current one',
+      () => toggleKey('prevLine'), icon('list'), el('span', null, 'Keep it on screen'));
+    btnPrev.dataset.key = 'prevLine';
+    prevRow.appendChild(btnPrev);
+
     return [
       el('div', 'ytds-setting-label', 'Text appears'),
       row,
       el('div', 'ytds-setting-note',
         `Words arrive as the speaker says them, and a pause in the talk is a `
         + `pause on screen. Turn it off to read ahead: each line is then there `
-        + `in full the moment it starts, the way it used to be.`)
+        + `in full the moment it starts, the way it used to be.`),
+      el('div', 'ytds-setting-label', 'Previous line'),
+      prevRow,
+      el('div', 'ytds-setting-note',
+        `The line before the current one stays above it, dimmed, so a sentence `
+        + `you did not finish is still there to read. Off by default: it puts `
+        + `two lines of each language on screen instead of one. Free reading `
+        + `only — study mode always holds a single sentence.`)
     ];
   }
 

@@ -1080,6 +1080,10 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   font: 400 calc(.95 * var(--u)) / 1.45 var(--sans);
   color: var(--ink-3);
 }
+/* Two settings under one group title: the second name needs more air above it
+   than the note below the first one leaves, or the pair reads as one setting
+   with a stray heading in the middle. */
+.ytds-setting-note + .ytds-setting-label { margin-top: calc(.8 * var(--u)); }
 /* A typed value and its unit. The reset below is not optional: YouTube styles
    inputs on its own pages, and the same reason we never used a native <select>
    applies here — an unstyled field would arrive wearing the player's clothes. */
