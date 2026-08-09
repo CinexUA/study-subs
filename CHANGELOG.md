@@ -76,6 +76,21 @@ A bug introduced and fixed before a release is not listed: nobody ever had it.
 
 ### Fixed
 
+- **Pointing at a phrase no longer answers with half of one.** Where several
+  English phrases share a single translated one, each was given a slice of it
+  cut by character count, so "I mentor," was answered with "працюю" — the first
+  half of "працюю наставником". Phrases that share an answer are now marked
+  together and given the whole of it. Coarser, and right.
+  Boundaries can still land a fragment off where the two languages put their
+  commas in different places; that is the limit of matching by length, not a
+  new fault.
+
+- **Pointing at a short sentence does something.** On a sentence with no comma
+  in it there is only one phrase to point at, and the mark was suppressed on the
+  grounds that it would say nothing the cursor had not already said. That is
+  true and beside the point: nothing on screen changed, and nothing changing
+  reads as broken. Such a sentence now marks like any phrase.
+
 - **On a long video the translation no longer sits under the wrong sentence.**
   On a four-hour lesson every translated line was a different sentence from the
   one above it — connected Ukrainian text running across English about something
