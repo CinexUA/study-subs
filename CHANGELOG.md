@@ -4,8 +4,15 @@ What changed between released versions, in the words of someone using the
 extension rather than writing it. Why a change was made and how it works lives
 in the commit that made it.
 
-`Unreleased` is what is finished on disk but not yet in the Chrome Web Store.
+A heading here means a version was PACKAGED under that number. It does not mean
+anyone received it: uploading is a separate act, and whether it happened is
+written in the store listing, never in this file. `Unreleased` is work that is
+finished on disk and carried by no package yet.
+
 A bug introduced and fixed before a release is not listed: nobody ever had it.
+One that shipped is listed even if it was fixed the same week — the test is
+whether a stranger's browser ever ran it, and this file is the wrong place to
+guess at that.
 
 ## 1.3.0 — 2026-08-09
 
