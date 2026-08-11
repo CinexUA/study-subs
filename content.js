@@ -1278,13 +1278,19 @@
 
   // A phrase ends where a WORD ends with one of those marks. Reading the word
   // rather than the character is what keeps 1,500 and 3:45 whole for free.
+  // A sentence end closes a phrase too: a free-reading line may glue two short
+  // sentences together ("...to you? Can you test..."), and the full stop
+  // between them is a harder boundary than any comma — without it the pair
+  // "no commas on the EN side, two sentences" collapsed into one target that
+  // lit the whole line. endsSentence rather than a character class so that
+  // "Mr." and "U.S." keep not cutting.
   function splitIntoChunks(text) {
     const words = String(text == null ? '' : text).trim().split(/\s+/).filter(Boolean);
     const chunks = [];
     let cur = [];
     for (let i = 0; i < words.length; i++) {
       cur.push({ t: 0, text: words[i], i });
-      if (CHUNK_END_RE.test(words[i].replace(CHUNK_TRAIL_RE, ''))) { chunks.push(cur); cur = []; }
+      if (CHUNK_END_RE.test(words[i].replace(CHUNK_TRAIL_RE, '')) || endsSentence(words[i])) { chunks.push(cur); cur = []; }
     }
     if (cur.length) chunks.push(cur);
     // `start: 0` on every phrase is deliberate: it makes the aligner's time

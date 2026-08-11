@@ -14,6 +14,16 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
+## Unreleased
+
+### Fixed
+
+- **Pointing at a line that holds two sentences no longer lights both.** A line
+  in free reading may carry two short sentences, and pointing anywhere in it
+  answered with the whole line and the whole translation under it. The end of a
+  sentence now bounds a phrase the same way a comma does, so each sentence is
+  its own answer, with its own part of the translation.
+
 ## 1.3.0 — 2026-08-09
 
 ### Added
