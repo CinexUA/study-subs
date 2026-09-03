@@ -14,7 +14,7 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
-## Unreleased
+## 1.3.1 — 2026-09-03
 
 ### Fixed
 
