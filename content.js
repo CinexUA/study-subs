@@ -1200,7 +1200,20 @@
     for (let i = 0; i <= n; i++) {
       if (i < n) {
         const t = enSents[i].start;
-        while (c + 1 < m && Math.abs(uaSents[c + 1].start - t) <= Math.abs(uaSents[c].start - t)) c++;
+        // The pointer walks on TIME, not on "is the next one nearer". The
+        // nearer-test stops dead the moment two UA starts run backwards: with
+        // 327.39 sitting in front of 326.76, every later sentence is nearer to
+        // the earlier index, so `c` froze at 103 for the rest of a 36-minute
+        // video (a1V6rsgAQ3k, 2026-09-03). Row n then pins the centre at m, the
+        // band jumps 572 sentences in one row, the DP cannot reach the end
+        // cell, and the backtrack leaves every one of the 681 sentences with an
+        // empty translation — a whole video with no translation at all, out of
+        // one 0.63 s inversion. Walking on time crosses it; the single
+        // look-ahead keeps the answer the true nearest, so on a track whose
+        // starts do rise (every one measured) this picks exactly what the
+        // nearer-test picked.
+        while (c + 1 < m && uaSents[c + 1].start <= t) c++;
+        if (c + 1 < m && Math.abs(uaSents[c + 1].start - t) <= Math.abs(uaSents[c].start - t)) c++;
       } else {
         c = m;
       }
