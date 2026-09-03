@@ -649,7 +649,16 @@
         if (endsSentence(text.slice(0, m.index + 1))) cuts.push(m.index + m[0].length);
       }
       if (!cuts.length) { out.push(u); continue; }
-      const endT = u.end != null ? u.end : (i + 1 < units.length ? units[i + 1].t : u.t + 2);
+      // The unit's own `end` is not a safe span to interpolate across. On an ASR
+      // track dDurationMs is a DISPLAY window and routinely outlives the next
+      // word's onset (977 of 4164 units on a1V6rsgAQ3k, by up to 3.96 s), so
+      // spreading the pieces over it puts a piece AFTER the unit that follows —
+      // measured 2026-09-03 on that video: "Час. У" at 323.16 with end 328.24,
+      // next word at 324.52, and the "У" landed at 327.39. Whatever a unit says
+      // is said before the next one starts, so that onset is the ceiling.
+      const nextT = i + 1 < units.length ? units[i + 1].t : null;
+      let endT = u.end != null ? u.end : (nextT != null ? nextT : u.t + 2);
+      if (nextT != null) endT = Math.min(endT, nextT);
       const span = Math.max(0, endT - u.t);
       let prev = 0;
       for (const c of [...cuts, text.length]) {

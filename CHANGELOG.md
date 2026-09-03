@@ -18,6 +18,15 @@ guess at that.
 
 ### Fixed
 
+- **A video whose translation loaded and then never appeared.** The reader
+  showed the original with an empty space under it, and the log said every
+  sentence had no translation — while the translated track was in hand, fully
+  downloaded, and correct. One caption in the middle of the video carried a time
+  that put it after the caption following it, and from there the step that fits a
+  translation to its original gave up on the whole video rather than on that one
+  place. Found on a 36-minute video where all 681 sentences came out
+  untranslated; all 681 now carry theirs.
+
 - **Pointing at a line that holds two sentences no longer lights both.** A line
   in free reading may carry two short sentences, and pointing anywhere in it
   answered with the whole line and the whole translation under it. The end of a
