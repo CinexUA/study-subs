@@ -61,6 +61,11 @@
       'l2.368-4.292C30.191,10.618,29.909,9.643,29.133,9.215z"/></svg>',
     rewind: S + '<path d="M9.4 5.6 5 10l4.4 4.4M16 5.6 11.6 10 16 14.4"/></svg>',
     forward: S + '<path d="M10.6 5.6 15 10l-4.4 4.4M4 5.6 8.4 10 4 14.4"/></svg>',
+    // Sound: one speaker, two waves; muted swaps the waves for a cross rather
+    // than striking the whole glyph through, so the two read apart at the size
+    // the transport draws them.
+    sound: S + '<path d="M3.4 7.9h2.9L10 5v10L6.3 12.1H3.4Z"/><path d="M12.6 7.4a3.4 3.4 0 0 1 0 5.2"/><path d="M14.9 5.2a6.2 6.2 0 0 1 0 9.6"/></svg>',
+    soundOff: S + '<path d="M3.4 7.9h2.9L10 5v10L6.3 12.1H3.4Z"/><path d="M12.9 8.1 16.5 11.9M16.5 8.1 12.9 11.9"/></svg>',
     repeat: S + '<path d="M4.6 9.4v-.8A2.8 2.8 0 0 1 7.4 5.8h6.3M11.7 3.6 14 5.8l-2.3 2.2M15.4 10.6v.8a2.8 2.8 0 0 1-2.8 2.8H6.3M8.3 16.4 6 14.2l2.3-2.2"/></svg>',
     chevL: S + '<path d="M12.4 5.2 7.4 10l5 4.8"/></svg>',
     chevR: S + '<path d="M7.6 5.2 12.6 10l-5 4.8"/></svg>',
@@ -107,6 +112,7 @@
   let srcLang = '';
   let lastSig = null, lastCtl = '', lastIdx = -1, ticksDur = 0, ticksLen = -1;
   let lastPlayIcon = '';  // transport glyph currently in the DOM (play/pause/replay)
+  let lastMuteIcon = '';  // same, for the sound button (sound/soundOff)
   let currentVideoId = null;
   let throttledUntil = 0;    // HTTP 429: when we may ask for a translation again
   let awaitingCapture = false;
@@ -161,7 +167,7 @@
   let awakeTimer = null, hintTimer = null, copyTimer = null, reloadTimer = null;
   let ptr = { x: 0, y: 0 };   // last known pointer position inside the panel
   let sleepPt = null;         // where it was when the interface hid
-  let elControls, elPlay, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
+  let elControls, elPlay, elMute, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
@@ -1515,6 +1521,16 @@
     video.pause();
     wishPlay(false);
   }
+  // Sound follows the same rule as playback: the player owns it, we only state
+  // the wish. Unlike play/pause there is no element write first — writing
+  // video.muted ourselves would make the player's own isMuted() agree with us
+  // while its slider still showed the old state, and the wish below would then
+  // decide there was nothing to do. One writer, and it is the player.
+  const wishMute = (want) => window.postMessage({ type: 'YTDS_SET_MUTE', want }, '*');
+  function toggleMute() {
+    if (!video) return;
+    wishMute(!video.muted);
+  }
   function seekBy(d) {
     if (!video || !video.duration) return;
     hideResume();
@@ -2785,7 +2801,10 @@
     // Outside the signature gate below: captions usually arrive while the
     // video is paused, i.e. while that gate is short-circuiting every frame.
     if (dur && (dur !== ticksDur || sentences.length !== ticksLen)) buildTicks(dur);
-    const sig = `${cur.toFixed(1)}|${video.paused ? 0 : 1}|${sentenceDone ? 1 : 0}|${Math.floor(dur)}`;
+    // muted belongs in the signature, not merely in the redraw below it: on a
+    // pause the clock stops moving and this gate short-circuits every frame, so
+    // without it the glyph would not follow a press of M until playback resumed.
+    const sig = `${cur.toFixed(1)}|${video.paused ? 0 : 1}|${sentenceDone ? 1 : 0}|${Math.floor(dur)}|${video.muted ? 1 : 0}`;
     if (sig === lastCtl) return;
     lastCtl = sig;
     // The glyph is the only place the third state is visible: after an auto-stop
@@ -2796,6 +2815,14 @@
         lastPlayIcon = name;
         setIcon(elPlay, name);
         elPlay.title = name === 'pause' ? 'Pause' : name === 'replay' ? 'Replay sentence (R)' : 'Play';
+      }
+    }
+    if (elMute) {
+      const name = video.muted ? 'soundOff' : 'sound';
+      if (name !== lastMuteIcon) {
+        lastMuteIcon = name;
+        setIcon(elMute, name);
+        elMute.title = video.muted ? 'Unmute (M)' : 'Mute (M)';
       }
     }
     if (elTime) elTime.textContent = `${fmtTime(cur)} / ${fmtTime(dur)}`;
@@ -3247,6 +3274,13 @@
   function buildControls() {
     elPlay = mkBtn('ytds-icon ytds-play', 'Play', togglePlay, icon('play'));
     lastPlayIcon = 'play';   // a rebuilt panel starts from a known glyph
+    // The sound button starts from the truth instead: the video may already be
+    // muted from before the reader opened, and the button that claims otherwise
+    // is worse than no button.
+    const muted = !!(video && video.muted);
+    lastMuteIcon = muted ? 'soundOff' : 'sound';
+    elMute = mkBtn('ytds-icon ytds-mute', muted ? 'Unmute (M)' : 'Mute (M)',
+      toggleMute, icon(lastMuteIcon));
     elTime = el('div', 'ytds-time', '0:00 / 0:00');
     elCounter = el('div', 'ytds-counter');
 
@@ -3255,6 +3289,7 @@
       mkBtn('ytds-icon', 'Back 10s', () => seekBy(-10), icon('rewind')),
       elPlay,
       mkBtn('ytds-icon', 'Forward 10s', () => seekBy(10), icon('forward')),
+      elMute,
       mkSpeedMenu(),
       elTime,
       elCounter,
@@ -3962,6 +3997,13 @@
       if (!study) return;
       claim();
       repeatSentence();
+    } else if (e.code === 'KeyM') {   // by physical key, like R
+      // Not gated on study mode: reading a video aloud yourself with the
+      // narrator silenced is just as much a free-reading thing. Claimed from
+      // YouTube either way — its own M is mute too, and two handlers on one
+      // press toggle twice, which looks like a dead key.
+      claim();
+      toggleMute();
     }
   }, true);
 

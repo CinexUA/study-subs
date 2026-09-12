@@ -253,6 +253,28 @@
       return;
     }
 
+    // Sound, same contract as playback state: the player owns it. We press its
+    // own mute button rather than writing video.muted, because that is what
+    // keeps its volume slider, its own M key and its memory of the choice
+    // across videos all agreeing with what the reader shows. It also means the
+    // reader needs no mute setting of its own — YouTube already stores one.
+    if (e.data.type === 'YTDS_SET_MUTE') {
+      const want = !!e.data.want;
+      try {
+        const p = document.getElementById('movie_player');
+        if (p && p.isMuted) {
+          if (p.isMuted() === want) return;
+          const btn = p.querySelector && p.querySelector('.ytp-mute-button');
+          if (btn) { btn.click(); return; }
+          if (p.mute && p.unMute) { want ? p.mute() : p.unMute(); return; }
+        }
+      } catch (_) {}
+      // No player API: drive the element, same backstop as YTDS_SET_PLAY.
+      const v = document.querySelector('video.html5-main-video') || document.querySelector('video');
+      if (v && v.muted !== want) v.muted = want;
+      return;
+    }
+
     // Same story as playback state: the player keeps its own rate and puts it
     // back on play, seek, ad or quality change. setPlaybackRate is only honoured
     // for rates the player offers itself, so anything off that ladder (0.9, 0.7)

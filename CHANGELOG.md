@@ -14,6 +14,19 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
+## Unreleased
+
+### Added
+
+- **Sound can be turned off without leaving the reader.** A speaker button sits
+  in the transport row, and `M` does the same from the keyboard. It is there for
+  reading a video aloud yourself — the narrator silent, the text arriving at the
+  pace you set — with one key to bring the voice back when you want to hear how
+  a word is actually said. It is the player's own mute, so the button shows the
+  truth even when the video was silenced before the reader opened, the state is
+  still there after you leave, and YouTube goes on remembering it from one video
+  to the next.
+
 ## 1.3.1 — 2026-09-03
 
 ### Fixed
