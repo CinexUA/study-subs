@@ -27,6 +27,14 @@ guess at that.
   still there after you leave, and YouTube goes on remembering it from one video
   to the next.
 
+- **`Shift+R` plays the sentence again and lets you hear it.** With the sound
+  off, this is the one key that hands the voice back: the sentence starts over
+  audibly, and the silence returns by itself when it reaches the full stop. A
+  pause in the middle does not cut the sound short — it is the sentence you
+  asked for, not a stretch of playback — while moving to another sentence,
+  reaching for the mute yourself or an ad starting all end it there and then.
+  Study mode only, and with the sound already on it is simply `R`.
+
 ## 1.3.1 — 2026-09-03
 
 ### Fixed

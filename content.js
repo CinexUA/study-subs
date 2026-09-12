@@ -198,6 +198,10 @@
   let sentIdx = 0;
   let stopAt = null;
   let sentenceDone = false;  // the current sentence played out and we stopped at its end
+  // The sentence we lifted the mute for, or -1. An intent for this sitting like
+  // sentenceDone, never saved: silence is the standing choice, and this is the
+  // one sentence allowed to interrupt it.
+  let loudIdx = -1;
   let stopTimer = null;      // precise stop scheduled for the exact remaining time
   let suppressSeek = false;  // our own currentTime writes must not look like user seeks
   let pauseIntentAt = 0;     // when we last asked for a pause (resume guard)
@@ -1529,6 +1533,9 @@
   const wishMute = (want) => window.postMessage({ type: 'YTDS_SET_MUTE', want }, '*');
   function toggleMute() {
     if (!video) return;
+    // Reaching for the sound yourself ends any "hear this sentence" still in
+    // flight: from here the state is what you set it to, not what we owe you.
+    loudIdx = -1;
     wishMute(!video.muted);
   }
   function seekBy(d) {
@@ -1638,6 +1645,10 @@
     // Last, well clear of the timing above: this is where learning stopped,
     // and it is the sentence that just played — the same one ▶ would replay.
     saveMark();
+    // Last of all, and only for the sentence the loan was taken for: the early
+    // returns above (an ad, a stop that fired ahead of the mark) never reach
+    // here, which is exactly right — neither of them ends a sentence.
+    if (loudIdx === sentIdx) endLoud(true);
   }
 
   // The stop belonging to the sentence we are in — or null when the playhead is
@@ -1737,7 +1748,10 @@
     const now = adNow();
     if (now !== adWas) {
       adWas = now;
-      if (now) onAdStart(); else onAdLeave();
+      // Before onAdStart, so a spot never plays through a mute we lifted for a
+      // sentence: the stop that would have put the silence back bails out on
+      // adNow(), and the rAF guard above never runs on an ad frame at all.
+      if (now) { endLoud(true); onAdStart(); } else onAdLeave();
     }
     if (adResumePending && !now) tryAdResume();
     return now;
@@ -1757,12 +1771,31 @@
   function setStudy(on) {
     state.study = on; saveState();
     if (on) { armStudy(); offerResume(); }
-    else { stopAt = null; sentenceDone = false; clearTimeout(stopTimer); stopTimer = null; hideResume(); } // free play again
+    // Leaving study takes the stops with it, and a loan with no stop to close
+    // it would leave the narrator talking for the rest of the video.
+    else { stopAt = null; sentenceDone = false; clearTimeout(stopTimer); stopTimer = null; hideResume(); endLoud(true); } // free play again
     syncUi();
   }
 
   // Repeat is a plain action, not a mode: play this sentence once more.
   function repeatSentence() { playSentence(sentIdx); }
+
+  // Repeat, but audible. Reading a video aloud with the narrator muted works
+  // until a word turns up you cannot pronounce — this is the one key that
+  // hands the voice back for that sentence and takes it away again after.
+  // With the sound already on there is nothing to lend, so it is plain repeat.
+  function hearSentence() {
+    if (!video || !state.study || !sentences.length) return;
+    if (video.muted) { loudIdx = sentIdx; wishMute(false); }
+    playSentence(sentIdx);
+  }
+  // Settle the loan. reMute false is for the case where you took the sound
+  // into your own hands — putting it back then would be us arguing with you.
+  function endLoud(reMute) {
+    if (loudIdx < 0) return;
+    loudIdx = -1;
+    if (reMute) wishMute(true);
+  }
 
   // ---------- resume mark ----------
   // What gets stored is the TIME a sentence starts, never its number: the
@@ -2047,6 +2080,7 @@
     // would answer for a track nobody is reading any more.
     chunkCache = {}; lineChunkCache = {};
     sentIdx = 0; stopAt = null; sentenceDone = false;
+    endLoud(true);   // sentence numbers are about to mean something else
     enUnitLen = enUnits.length; uaUnitLen = uaUnits.length;
     lastSig = null; lastIdx = -1;
     dbg(`ready: source ${enUnits.length} units / ${enLines.length} lines · ${sentences.length} sentences · ` +
@@ -2168,6 +2202,7 @@
     captionsReady = false;
     sentences = []; uaSentences = []; chunkCache = {}; lineChunkCache = {};
     sentIdx = 0; stopAt = null; sentenceDone = false;
+    endLoud(true);   // sentence numbers are about to mean something else
     // Without this the notches survive into the next video, and two videos of
     // the same length with the same sentence count would never redraw them.
     ticksDur = 0; ticksLen = -1;
@@ -2416,6 +2451,10 @@
     // therefore cheaper than an ordinary one: no controls, no guard, no render.
     if (pumpAd()) return;
     updateControls();
+    // One comparison instead of a hook in every way out of a sentence: the
+    // arrows, the scrubber, a resync after a manual seek, the resume card. Miss
+    // one of those and the narrator follows you into the next sentence.
+    if (loudIdx >= 0 && loudIdx !== sentIdx) endLoud(true);
     guardPause();
     // The precise stop timer does the real work; this is a backup.
     if (stopAt != null && video && !video.paused && video.currentTime >= stopAt) hitStop('rAF backup');
@@ -3710,8 +3749,9 @@
     elKeys.textContent = '';
     elKeys.appendChild(el('span', 'ytds-keys-mode', study ? 'Study' : 'Free'));
     const rows = study
-      ? [['Space', 'play / pause'], ['R', 'repeat'], ['←→', 'sentence'], ['Esc', 'exit']]
-      : [['←→', 'seek 5 s'], ['Esc', 'exit'], ['Space R', 'player']];
+      ? [['Space', 'play / pause'], ['R', 'repeat'], ['⇧R', 'repeat aloud'],
+         ['←→', 'sentence'], ['M', 'mute'], ['Esc', 'exit']]
+      : [['←→', 'seek 5 s'], ['M', 'mute'], ['Esc', 'exit'], ['Space R', 'player']];
     for (const [k, t] of rows) {
       const s = el('span');
       s.append(el('b', null, k), txt(' ' + t));
@@ -3918,6 +3958,8 @@
     // the overlay and closing it again would overwrite yesterday's sentence
     // with whatever position YouTube happened to restore.
     if (markMoved) saveMark();
+    // Silence was the standing choice; walking out is not a reason to drop it.
+    endLoud(true);
     hideResume();
     // Closing the overlay withdraws the permission that started the enable loop
     // (see the tail of loadCaptions). Left running it would go on poking the
@@ -3996,7 +4038,9 @@
     } else if (e.code === 'KeyR') {   // by physical key: layout-independent
       if (!study) return;
       claim();
-      repeatSentence();
+      // Shift is the modifier the early return above lets through, and it
+      // reads as what it does: repeat, but let me hear it.
+      e.shiftKey ? hearSentence() : repeatSentence();
     } else if (e.code === 'KeyM') {   // by physical key, like R
       // Not gated on study mode: reading a video aloud yourself with the
       // narrator silenced is just as much a free-reading thing. Claimed from
