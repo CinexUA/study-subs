@@ -5,7 +5,7 @@
 (() => {
   'use strict';
 
-  const THROTTLE_KEY = 'ytdscap-throttle';   // when YouTube last told us to slow down
+  const THROTTLE_KEY = 'ytdscap-throttle';   // { until, rung }: the back-off in progress, if any
   const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300, reveal: true, prevLine: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
@@ -243,10 +243,15 @@
   let elResume = null, elResumeText = null, elResumeAgo = null, elResumeGo = null, elMark = null;
 
   // ---------- state ----------
-  // A back-off started on a previous page load still counts.
+  // A back-off started on a previous page load still counts, rung and all. The
+  // rung is forgotten an hour after its deadline: by then the refusal it
+  // counted is old news, and the first wait should be a minute again.
   chrome.storage.local.get(THROTTLE_KEY, (r) => {
-    const left = (r[THROTTLE_KEY] || 0) - Date.now();
-    if (left > 0) { throttledUntil = performance.now() + left; dbg(`captions rate-limited, ${Math.ceil(left / 1000)}s to go`); }
+    const v = r[THROTTLE_KEY];
+    const until = typeof v === 'number' ? v : ((v && v.until) || 0);   // a bare number: the shape before 1.4.1
+    const left = until - Date.now();
+    if (left > -3600000) backoffRung = Math.max(1, (v && v.rung) || 0);
+    if (left > 0) { throttledUntil = performance.now() + left; dbg(`captions rate-limited, ${fmtWait(left)} to go`); }
   });
 
   chrome.storage.local.get('ytds', (r) => {
@@ -386,19 +391,73 @@
     } catch (_) { return url; }
   }
 
-  const delay = (ms) => new Promise((r) => setTimeout(r, ms));
-  const RETRY_MS = 3000;      // one second chance after a 429: a burst can be bad luck
-  const THROTTLE_MS = 60000;  // twice in a row is the quota talking — stop asking
+  // ---------- back-off ----------
+  // HTTP 429 is YouTube's word and not ours to argue with. Measured 2026-09-21:
+  // the player's own request was refused at 8:24 and the first one to pass was
+  // ours at 8:59. In between, a 60 s pause, a second try 3 s after every first
+  // and three manual reloads spent six requests and heard six refusals. So:
+  // one request per attempt, and the wait between attempts doubles, from a
+  // minute up to half an hour. The deadline and the rung both survive a page
+  // reload — otherwise every Ctrl+Shift+R would start the ladder over at one
+  // minute — and a request that goes through starts it over for real.
+  const BACKOFF_MIN = [1, 2, 4, 8, 16, 30];
+  let backoffRung = 0;     // refusals in a row; the next wait is BACKOFF_MIN[rung]
+  let retryTimer = null;   // the attempt promised for when throttledUntil passes
+  let retryBase = null;    // the url that attempt asks on, for currentVideoId
+
+  const fmtWait = (ms) => (ms >= 60000 ? `${Math.round(ms / 60000)} min` : `${Math.ceil(ms / 1000)} s`);
+
+  // Retry-After is seconds or an HTTP date. Either way it is a wait the server
+  // named itself, and it wins over the ladder when it is the longer one.
+  function retryAfterMs(res) {
+    let h = null;
+    try { h = res.headers.get('retry-after'); } catch (_) {}
+    if (!h) return 0;
+    const ms = /^\d+$/.test(h.trim()) ? Number(h) * 1000 : Date.parse(h) - Date.now();
+    return ms > 0 ? ms : 0;
+  }
 
   // One place starts the pause, whoever heard the refusal — our own fetch or
   // the player's request we listened in on.
-  function backOff(what) {
-    throttledUntil = performance.now() + THROTTLE_MS;
-    // Survives a page reload on purpose: without it every Ctrl+Shift+R
-    // spends two more requests on a quota that is already refusing us,
-    // which is how a short cool-off turns into a long one.
-    try { chrome.storage.local.set({ [THROTTLE_KEY]: Date.now() + THROTTLE_MS }); } catch (_) {}
-    dbg(`${what}: HTTP 429 — backing off for ${THROTTLE_MS / 1000}s`);
+  function backOff(what, named = 0) {
+    const rung = Math.min(backoffRung, BACKOFF_MIN.length - 1);
+    const ms = Math.max(BACKOFF_MIN[rung] * 60000, named);
+    backoffRung = rung + 1;
+    throttledUntil = performance.now() + ms;
+    try { chrome.storage.local.set({ [THROTTLE_KEY]: { until: Date.now() + ms, rung: backoffRung } }); } catch (_) {}
+    dbg(`${what}: HTTP 429 — backing off for ${fmtWait(ms)}` + (named ? ` (Retry-After says ${fmtWait(named)})` : ''));
+  }
+
+  function clearBackOff() {
+    if (!backoffRung) return;
+    backoffRung = 0; throttledUntil = 0;
+    try { chrome.storage.local.remove(THROTTLE_KEY); } catch (_) {}
+    dbg('a caption request went through — the back-off ladder starts over');
+  }
+
+  // The attempt the back-off promises, so that the translation comes back
+  // without anyone reaching for Reload captions. It belongs to this load: a new
+  // video or a language change goes through loadCaptions, which cancels it.
+  // With the source on screen it asks for the translation alone; with nothing
+  // on screen yet it runs the whole load again.
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    const gen = loadGen;
+    const attempt = async () => {
+      retryTimer = null;
+      if (gen !== loadGen) return;
+      // A track fetched now would not be kept — the cache gate says an ad is
+      // playing — and the ad ends by itself.
+      if (adNow()) { retryTimer = setTimeout(attempt, 5000); return; }
+      if (!captionsReady) { dbg('back-off over — loading captions again'); loadCaptions(); return; }
+      if (!translationMissing) return;
+      // A url the player has used since is the better one to ask on.
+      const base = capturedBase && capturedForVideo === currentVideoId ? capturedBase : retryBase;
+      if (!base) return;
+      dbg(`back-off over — asking for the ${state.targetLang} translation again`);
+      if (await buildFromBase(base, null, '') && !translationMissing) showHint('Translation loaded');
+    };
+    retryTimer = setTimeout(attempt, Math.max(1000, throttledUntil - performance.now()) + 500);
   }
 
   // Every attempt says what came back. The translation is the one track we
@@ -409,26 +468,24 @@
   async function fetchUnits(baseUrl, tlang) {
     const left = throttledUntil - performance.now();
     if (tlang && left > 0) {
-      dbg(`fetch ${tlang}: skipped — rate-limited, ${Math.ceil(left / 1000)}s to go`);
+      dbg(`fetch ${tlang}: skipped — rate-limited, ${fmtWait(left)} to go`);
       return [];
     }
     const tl = tlang ? '&tlang=' + encodeURIComponent(tlang) : '';
     for (const fmt of ['&fmt=json3', '']) {
       const what = `${tlang || 'source'}${fmt ? ' json3' : ' no-fmt'}`;
-      const ask = () => fetch(baseUrl + fmt + tl);
       let res;
       try {
-        res = await ask();
-        if (res.status === 429) {
-          dbg(`fetch ${what}: HTTP 429 — waiting ${RETRY_MS / 1000}s and asking once more`);
-          await delay(RETRY_MS);
-          res = await ask();
-        }
+        res = await fetch(baseUrl + fmt + tl);
       } catch (e) {
         dbg(`fetch ${what}: network error — ${e.message}`);
         continue;
       }
-      if (res.status === 429) { backOff(`fetch ${what} again`); return []; }
+      // One request per attempt. Asking once more 3 s later was the rule until
+      // 2026-09-21, in case a refusal was a burst's bad luck; in every pair on
+      // record the second answer was the first one again, so all it ever did
+      // was double what an attempt cost.
+      if (res.status === 429) { backOff(`fetch ${what}`, retryAfterMs(res)); return []; }
       // A refusal is about the request, not the format: asking again with a
       // different fmt only spends another slice of the same quota.
       if (!res.ok) { dbg(`fetch ${what}: HTTP ${res.status}`); return []; }
@@ -438,6 +495,7 @@
       // like this, that url stays empty forever, and the second fmt would spend
       // one more request to hear the same silence.
       if (!body) { dbg(`fetch ${what}: HTTP ${res.status}, 0 bytes — stale token, not the format`); return []; }
+      clearBackOff();
       const units = parseUnits(body);
       dbg(`fetch ${what}: HTTP ${res.status}, ${body.length} bytes → ${units.length} units`);
       if (units.length) return units;
@@ -2183,13 +2241,20 @@
       uaUnits = await translationUnits(base, state.targetLang);
     }
     translationMissing = !sameLang && !uaUnits.length;
+    if (translationMissing) retryBase = base;   // whatever asks again, asks here
     // Not while a fresh url is still on its way: over an unproven url the loader
     // carries on to the loud half, and telling the reader it failed over a retry
     // in flight is simply wrong. The give-up branch says it instead.
     if (translationMissing && (provenBase(base) || throttledUntil > performance.now())) {
-      showHint(throttledUntil > performance.now()
-        ? 'YouTube is rate-limiting caption requests — the translation will come back in a few minutes'
-        : 'Translation did not load — pick the language again', 4500);
+      if (throttledUntil > performance.now()) {
+        // The hint used to promise the translation "in a few minutes" and
+        // nothing ever went to get it. The attempt is scheduled here, on this
+        // url unless the player mints a better one first.
+        scheduleRetry();
+        showHint(`YouTube is rate-limiting caption requests — trying again in ${fmtWait(throttledUntil - performance.now())}`, 4500);
+      } else {
+        showHint('Translation did not load — pick the language again', 4500);
+      }
     }
 
     return finishBuild(enUnits, uaUnits, sameLang, gen);
@@ -2212,6 +2277,7 @@
     clearTimeout(stopTimer); stopTimer = null;
     awaitingCapture = false; pokePending = false;
     translationMissing = false; retriedForTranslation = false;
+    clearTimeout(retryTimer); retryTimer = null; retryBase = null;
     captureRetries = 0; sawTracks = false;
     availability = 'unknown';
     clearTimeout(captureTimer);
@@ -2322,7 +2388,7 @@
       window.postMessage({ type: 'YTDS_STOP_ENABLE' }, '*');
       if (captionsReady) {
         dbg('gave up waiting for a url with a live pot — the translation stays empty for now');
-        if (translationMissing) showHint('Translation did not load — try Reload captions in the settings drawer', 4500);
+        if (translationMissing && throttledUntil <= performance.now()) showHint('Translation did not load — try Reload captions in the settings drawer', 4500);
         return;
       }
       if (sawTracks) {
@@ -2355,7 +2421,19 @@
     // the network for the answer the player had already been given.
     if (status != null && (status < 200 || status >= 300)) {
       dbg(`the player's own ${capTlang || 'source'} request was refused (HTTP ${status}) — not keeping it`);
-      if (status === 429) backOff(`player ${capTlang || 'source'}`);
+      if (status === 429) {
+        backOff(`player ${capTlang || 'source'}`);
+        // Toggling CC on and off further only makes the player ask again and
+        // hear the same; the wait is what helps, and the attempt after it is
+        // scheduled here.
+        if (!captionsReady) {
+          captureDone();
+          setStatus(`YouTube is rate-limiting caption requests — trying again in ${fmtWait(throttledUntil - performance.now())}`);
+          scheduleRetry();
+        } else if (translationMissing) {
+          scheduleRetry();
+        }
+      }
       return;
     }
     const empty = !(body || '').length;
@@ -2386,6 +2464,10 @@
     // on every request the player makes.
     if (captionsReady && !(translationMissing && !retriedForTranslation)) return;
     if (captionsReady) {
+      // Not while the back-off is on: the fetch would be skipped, and the one
+      // rebuild this load gets would be spent hearing nothing. The url is
+      // recorded above, and the scheduled attempt prefers it.
+      if (throttledUntil > performance.now()) return;
       retriedForTranslation = true;
       dbg('rebuilding on a freshly minted url — the translation was missing');
     }
