@@ -43,7 +43,8 @@ the captions into lines, so one sentence stays one sentence.
 The published build lives in the
 [Chrome Web Store](https://chromewebstore.google.com/detail/study-subs-%E2%80%94-dual-subtitl/lodajmmoenlnkiplbeigflgnngojkada);
 that is the version to use unless you intend to change the code. It asks for
-`storage` and access to `www.youtube.com`, and nothing else.
+`storage`, `unlimitedStorage` (room for the subtitle cache) and access to
+`www.youtube.com`, and nothing else.
 
 Open any video on `youtube.com` afterwards — a **📖 Dual subtitles** pill appears
 in the row of actions under the video, and a matching button in the player's
@@ -75,7 +76,7 @@ nothing referenced can be forgotten. Icons are cut from the source artwork with
 ## How it works
 
 - `manifest.json` — Manifest V3, two content scripts on `www.youtube.com`,
-  permissions `storage` and that one host.
+  permissions `storage`, `unlimitedStorage` and that one host.
 - `injected.js` — page world (`world: MAIN`): watches the player's own requests
   for the subtitle track and reads `getPlayerResponse()`.
 - `content.js` — isolated world: adds the two entry points, builds the overlay,

@@ -23,9 +23,9 @@ all of it.
 | What | Why it is kept |
 |---|---|
 | Your settings: translation language, theme, font size, playback speed, whether the translation line is shown, end-of-sentence pause | So the overlay opens the way you left it |
-| A cache of subtitle text and its word timings for the videos you have opened, keyed by YouTube video ID — the 20 most recent tracks | So re-watching a video needs no network request at all, and so the extension keeps working if YouTube rate-limits you |
+| A cache of subtitle text and its word timings for the videos you have opened, keyed by YouTube video ID — the 200 most recently used tracks, about 200 KB each | So re-watching a video needs no network request at all, and so the extension keeps working if YouTube rate-limits you |
 | Your study bookmark: the timestamp of the sentence you stopped at, per video ID — the 200 most recent videos, about 50 bytes each | So the extension can offer to continue where you left off |
-| A timestamp of when YouTube last asked us to slow down | So the extension backs off politely instead of retrying into a wall |
+| When YouTube last asked us to slow down, and how many times in a row | So the extension backs off politely, and waits longer each time, instead of retrying into a wall |
 
 Be aware of what the second and third rows mean in practice: the list of video
 IDs you have watched with the extension open is stored **locally**. It is never
@@ -49,6 +49,9 @@ has no backend.
 
 - **`storage`** — to keep the settings, the subtitle cache and the study
   bookmark listed above on your device. Nothing else uses it.
+- **`unlimitedStorage`** — so the subtitle cache can hold 200 tracks; without
+  it Chrome caps an extension's local storage at 10 MB. It grants no access to
+  anything, only room.
 - **Host access to `https://www.youtube.com/*`** — to read the subtitles of the
   video on the page you are already viewing, and to draw the overlay on that
   page. The extension has no access to any other website.

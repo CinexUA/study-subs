@@ -509,7 +509,11 @@
   // and never touches `pot` — the most fragile thing here. Requests are also
   // exactly what ran us into HTTP 429.
   const CACHE_V = 2;          // bump if the shape of a record ever changes
-  const CACHE_KEEP = 20;      // tracks kept on disk (~10 videos, ~300 KB each)
+  // Tracks kept on disk: two per video, ~200 KB each. It was 20 until
+  // 2026-09-21 — ten videos, under the 10 MB that chrome.storage.local allows
+  // without `unlimitedStorage`; with the permission the ceiling is the disk,
+  // and a track that was refused once is worth far more than the space.
+  const CACHE_KEEP = 200;
   const CACHE_IDX = 'ytdscap-idx';
   const CACHE_PREFIX = `ytdscap:${CACHE_V}:`;
   const memCache = new Map(); // same, for this page's life: instant relanguaging
@@ -522,6 +526,14 @@
   // Map grows for the whole session (a dozen videos is a few MB of units).
   const forget = (keys) => { for (const k of keys) memCache.delete(k); };
 
+  // Everything that rewrites the index goes through here, one at a time. A read
+  // that promotes its key and a write that evicts both start from a copy of the
+  // index, and without the queue the last one to land would decide the order
+  // for both — a video's source promoted and then demoted a moment later by
+  // the write of its own translation.
+  let idxQueue = Promise.resolve();
+  const withIndex = (fn) => (idxQueue = idxQueue.then(fn, fn));
+
   async function cachedTrack(slot) {
     const key = cacheKey(slot);
     const memo = memCache.get(key);
@@ -529,26 +541,48 @@
     try {
       const got = await chrome.storage.local.get(key);
       const rec = got && got[key];
-      if (rec && rec.units && rec.units.length) { memCache.set(key, rec); return rec; }
+      if (rec && rec.units && rec.units.length) { memCache.set(key, rec); touchCache(key); return rec; }
     } catch (_) {}
     return null;
+  }
+
+  // A hit moves its key to the front. Eviction used to go by the time a track
+  // was WRITTEN, so a video watched every week fell off the end exactly like
+  // one never opened again — 2026-09-21: the translation for a video with a
+  // resume mark nine days old was gone, while ten newer ones stayed. Read
+  // misses are what send a request to a quota that answers 429, so this is
+  // the cache's actual job. A key on disk but missing from the index is
+  // promoted too: otherwise nothing would ever evict it.
+  function touchCache(key) {
+    withIndex(async () => {
+      try {
+        const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+        const at = was.indexOf(key);
+        // A video's two keys take turns at the front; second place is near
+        // enough, and a write on every hit would be two per video opened.
+        if (at >= 0 && at < 2) return;
+        await chrome.storage.local.set({ [CACHE_IDX]: [key, ...was.filter((k) => k !== key)] });
+      } catch (e) { dbg('caption cache touch failed: ' + e.message); }
+    });
   }
 
   async function cacheTrack(slot, lang, units) {
     const key = cacheKey(slot);
     const rec = { lang, units };
     memCache.set(key, rec);
-    try {
-      const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
-      // Keys of an older CACHE_V can no longer be read, so the first write
-      // after an upgrade is what sweeps them off the disk.
-      const stale = was.filter((k) => k.indexOf(CACHE_PREFIX) !== 0);
-      const idx = [key, ...was.filter((k) => k !== key && k.indexOf(CACHE_PREFIX) === 0)];
-      const drop = [...stale, ...idx.splice(CACHE_KEEP)];   // oldest fall off the end
-      await writeCache(key, rec, idx, drop);
-    } catch (e) {
-      dbg('caption cache write failed: ' + e.message);
-    }
+    await withIndex(async () => {
+      try {
+        const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+        // Keys of an older CACHE_V can no longer be read, so the first write
+        // after an upgrade is what sweeps them off the disk.
+        const stale = was.filter((k) => k.indexOf(CACHE_PREFIX) !== 0);
+        const idx = [key, ...was.filter((k) => k !== key && k.indexOf(CACHE_PREFIX) === 0)];
+        const drop = [...stale, ...idx.splice(CACHE_KEEP)];   // oldest fall off the end
+        await writeCache(key, rec, idx, drop);
+      } catch (e) {
+        dbg('caption cache write failed: ' + e.message);
+      }
+    });
   }
 
   // Eviction counts records, not bytes, so a set of unusually large tracks can
@@ -600,12 +634,14 @@
   async function purgeVideoCache() {
     const mine = (k) => k.indexOf(`${CACHE_PREFIX}${currentVideoId}:`) === 0;
     forget([...memCache.keys()].filter(mine));
-    try {
-      const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
-      const drop = was.filter(mine);
-      if (drop.length) await chrome.storage.local.remove(drop);   // same order as writeCache
-      await chrome.storage.local.set({ [CACHE_IDX]: was.filter((k) => !mine(k)) });
-    } catch (e) { dbg('cache clear failed: ' + e.message); }
+    await withIndex(async () => {
+      try {
+        const was = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+        const drop = was.filter(mine);
+        if (drop.length) await chrome.storage.local.remove(drop);   // same order as writeCache
+        await chrome.storage.local.set({ [CACHE_IDX]: was.filter((k) => !mine(k)) });
+      } catch (e) { dbg('cache clear failed: ' + e.message); }
+    });
     dbg('captions cache cleared for this video');
   }
 

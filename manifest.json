@@ -10,7 +10,7 @@
     "128": "icons/icon128.png"
   },
   "minimum_chrome_version": "111",
-  "permissions": ["storage"],
+  "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://www.youtube.com/*"],
   "content_scripts": [
     {

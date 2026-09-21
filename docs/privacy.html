@@ -77,7 +77,8 @@ extension deletes all of it.</p>
   </tr>
   <tr>
     <td>A cache of subtitle text and its word timings for videos you have opened,
-    keyed by YouTube video ID — the 20 most recent tracks</td>
+    keyed by YouTube video ID — the 200 most recently used tracks, about 200 KB
+    each</td>
     <td>So re-watching needs no network request at all, and the extension keeps
     working if YouTube rate-limits you</td>
   </tr>
@@ -87,8 +88,10 @@ extension deletes all of it.</p>
     <td>So it can offer to continue where you left off</td>
   </tr>
   <tr>
-    <td>A timestamp of when YouTube last asked the extension to slow down</td>
-    <td>So it backs off politely instead of retrying into a wall</td>
+    <td>When YouTube last asked the extension to slow down, and how many times in
+    a row</td>
+    <td>So it backs off politely, and waits longer each time, instead of retrying
+    into a wall</td>
   </tr>
 </table>
 
@@ -116,6 +119,9 @@ no backend.</p>
 <ul>
   <li><code>storage</code> — to keep the settings, the subtitle cache and the study
   bookmark listed above on your device. Nothing else uses it.</li>
+  <li><code>unlimitedStorage</code> — so the subtitle cache can hold 200 tracks;
+  without it Chrome caps an extension's local storage at 10 MB. It grants no
+  access to anything, only room.</li>
   <li>Host access to <code>https://www.youtube.com/*</code> — to read the subtitles
   of the video on the page you are already viewing, and to draw the overlay on that
   page. The extension has access to no other website.</li>
