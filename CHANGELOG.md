@@ -14,6 +14,40 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
+## Unreleased
+
+### Fixed
+
+- **A translation YouTube refused now comes back by itself.** When YouTube
+  rate-limits subtitle requests, the reader used to pause for a minute, say the
+  translation "will come back in a few minutes", and never go and get it: the
+  only way back was Reload captions, and each press asked twice. It now asks
+  once, waits longer after each refusal — a minute, then two, up to half an
+  hour, or as long as YouTube itself names — and goes back for the translation
+  when the wait is over, with the original staying on screen meanwhile. The
+  hint says when the next attempt is. Found on a morning where the refusals
+  lasted thirty-five minutes and three reloads by hand changed nothing.
+
+- **A refusal the player itself receives no longer counts as subtitles.** The
+  player's own request for a translation can be refused too, and its answer —
+  a short error page — was kept as if it were a track, so switching to that
+  language parsed it to nothing and then asked the network for the refusal
+  again. The status is now read with the body; a refused answer is dropped,
+  and the wait starts from there.
+
+- **The videos you come back to stay in the cache.** Tracks were evicted by
+  the date they were first saved, so a video re-watched every week left the
+  cache as readily as one opened once, and the next open went to the network —
+  the very request that gets refused. A re-watch now keeps its tracks at the
+  front of the line.
+
+### Changed
+
+- **The subtitle cache holds 200 tracks instead of 20.** That is a hundred
+  videos with their translation rather than ten. It needs the `unlimitedStorage`
+  permission, which grants room only, not access, and Chrome asks nothing for
+  it.
+
 ## 1.4.0 — 2026-09-12
 
 ### Added
