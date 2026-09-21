@@ -390,6 +390,17 @@
   const RETRY_MS = 3000;      // one second chance after a 429: a burst can be bad luck
   const THROTTLE_MS = 60000;  // twice in a row is the quota talking — stop asking
 
+  // One place starts the pause, whoever heard the refusal — our own fetch or
+  // the player's request we listened in on.
+  function backOff(what) {
+    throttledUntil = performance.now() + THROTTLE_MS;
+    // Survives a page reload on purpose: without it every Ctrl+Shift+R
+    // spends two more requests on a quota that is already refusing us,
+    // which is how a short cool-off turns into a long one.
+    try { chrome.storage.local.set({ [THROTTLE_KEY]: Date.now() + THROTTLE_MS }); } catch (_) {}
+    dbg(`${what}: HTTP 429 — backing off for ${THROTTLE_MS / 1000}s`);
+  }
+
   // Every attempt says what came back. The translation is the one track we
   // fetch ourselves — the original arrives inside the interception — so when
   // it comes back empty this is the only place that can tell whether the
@@ -417,15 +428,7 @@
         dbg(`fetch ${what}: network error — ${e.message}`);
         continue;
       }
-      if (res.status === 429) {
-        throttledUntil = performance.now() + THROTTLE_MS;
-        // Survives a page reload on purpose: without it every Ctrl+Shift+R
-        // spends two more requests on a quota that is already refusing us,
-        // which is how a short cool-off turns into a long one.
-        try { chrome.storage.local.set({ [THROTTLE_KEY]: Date.now() + THROTTLE_MS }); } catch (_) {}
-        dbg(`fetch ${what}: HTTP 429 again — backing off for ${THROTTLE_MS / 1000}s`);
-        return [];
-      }
+      if (res.status === 429) { backOff(`fetch ${what} again`); return []; }
       // A refusal is about the request, not the format: asking again with a
       // different fmt only spends another slice of the same quota.
       if (!res.ok) { dbg(`fetch ${what}: HTTP ${res.status}`); return []; }
@@ -2335,13 +2338,26 @@
     }, 25000);
   }
 
-  async function handleCaptured(url, body) {
+  async function handleCaptured(url, body, status) {
     // Ads carry captions of their own. Taking one here would label the spot's
     // track as this video's — in capturedBase, and from there into the cache
     // under the video's id.
     if (adNow()) { dbg('intercepted timedtext during an ad — ignored'); return; }
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
+    // The player itself was refused. Its body is an error page, not a track,
+    // and the url says nothing about `pot` either way — nothing here is worth
+    // keeping. What the refusal does say is that the quota is shut for this
+    // account right now, for the player's own requests: ours would only hear
+    // the same thing, so the back-off starts here without spending them.
+    // Until 2026-09-21 this body went into capturedBody like any other, and
+    // the language change that reused it parsed it to nothing and then went to
+    // the network for the answer the player had already been given.
+    if (status != null && (status < 200 || status >= 300)) {
+      dbg(`the player's own ${capTlang || 'source'} request was refused (HTTP ${status}) — not keeping it`);
+      if (status === 429) backOff(`player ${capTlang || 'source'}`);
+      return;
+    }
     const empty = !(body || '').length;
 
     // An empty answer is the url talking, not the track: the player built it
@@ -2431,8 +2447,8 @@
     } else if (e.data.type === 'YTDS_TT') {
       const tl = /[?&]tlang=([^&]*)/.exec(e.data.url);
       const pot = /[?&]pot=/.test(e.data.url) ? 'yes' : 'NO';
-      dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, pot=${pot}, body=${(e.data.body || '').length} bytes)`);
-      handleCaptured(e.data.url, e.data.body);
+      dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, pot=${pot}, HTTP ${e.data.status == null ? '?' : e.data.status}, body=${(e.data.body || '').length} bytes)`);
+      handleCaptured(e.data.url, e.data.body, e.data.status);
     }
   });
 

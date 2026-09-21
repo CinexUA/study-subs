@@ -6,7 +6,11 @@
 (() => {
   'use strict';
 
-  const report = (url, body) => window.postMessage({ type: 'YTDS_TT', url, body }, '*');
+  // The status travels with the body. A refusal answers with a page of its
+  // own, and without the status that page reads like a short track: measured
+  // 2026-09-21, the player's own tlang=uk request came back as 1103 bytes and
+  // was kept as if they were captions, while the real track weighs 433 KB.
+  const report = (url, body, status) => window.postMessage({ type: 'YTDS_TT', url, body, status }, '*');
   const log = (msg) => window.postMessage({ type: 'YTDS_LOG', msg }, '*');
   const isTT = (u) => typeof u === 'string' && u.indexOf('/api/timedtext') !== -1;
 
@@ -16,7 +20,7 @@
     const url = typeof input === 'string' ? input : (input && input.url);
     const p = origFetch.apply(this, arguments);
     if (isTT(url)) {
-      p.then((r) => { r.clone().text().then((b) => report(url, b)).catch(() => {}); })
+      p.then((r) => { const status = r.status; r.clone().text().then((b) => report(url, b, status)).catch(() => {}); })
        .catch(() => {});
     }
     return p;
@@ -32,7 +36,7 @@
   XMLHttpRequest.prototype.send = function () {
     if (isTT(this._ytdsUrl)) {
       this.addEventListener('load', () => {
-        try { report(this._ytdsUrl, this.responseText); } catch (_) {}
+        try { report(this._ytdsUrl, this.responseText, this.status); } catch (_) {}
       });
     }
     return OrigSend.apply(this, arguments);
