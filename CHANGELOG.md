@@ -14,6 +14,22 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
+## Unreleased
+
+### Fixed
+
+- **The translation stays under its own sentence on videos whose subtitles
+  have no punctuation.** Some automatic subtitles come as plain lowercase
+  words with no full stops at all. There the reader can only cut sentences at
+  pauses, so they come out long and few, while YouTube's translation has full
+  stops of its own and comes out in many short ones. The reader matched the
+  two by length and lost track: the first few minutes of translation sat under
+  the chapter title, the next long sentence had none, and the rest drifted.
+  On a 93-minute audiobook only about a third of the translation stood under
+  the sentence it belonged to. On such videos each word of the translation
+  now goes under the sentence it is spoken in. Videos whose subtitles have
+  punctuation are not affected.
+
 ## 1.4.1 — 2026-09-21
 
 ### Fixed

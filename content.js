@@ -1146,9 +1146,7 @@
     // gap rule there does nothing but invent sentence boundaries mid-sentence —
     // and a translation cut into more fragments than the source has sentences
     // is exactly what the aligner cannot put back together.
-    let marks = 0;
-    for (const u of units) if (endsSentence(u.text)) marks++;
-    const byGaps = marks < units.length / 50;
+    const byGaps = unpunctuated(units);
     for (let i = 0; i < units.length; i++) {
       const u = units[i], next = units[i + 1];
       if (!cur) { cur = { start: u.t, units: [] }; buf = ''; }
@@ -1226,20 +1224,60 @@
   // The 60 s slack is deliberate: a track that simply ends with the speech,
   // or one whose last cue is a little early, must not trip this.
   const AL_TAIL_SLACK = 60;
-  function alignCovered(uaSents, enSents) {
+  function alignCovered(uaSents, enSents, byTime) {
+    const align = byTime ? alignByTime : alignSentences;
     uaCoverEnd = Infinity;
     const last = uaSents.length ? uaSents[uaSents.length - 1] : null;
     const reach = last ? Math.max(last.start, last.units.length ? last.units[last.units.length - 1].t : 0) : 0;
     const enEnd = enSents.length ? enSents[enSents.length - 1].start : 0;
-    if (!last || reach >= enEnd - AL_TAIL_SLACK) return alignSentences(uaSents, enSents);
+    if (!last || reach >= enEnd - AL_TAIL_SLACK) return align(uaSents, enSents);
     uaCoverEnd = reach;
     let cut = enSents.length;
     while (cut > 0 && enSents[cut - 1].start > reach) cut--;
     dbg(`translation covers ${fmtTime(reach)} of ${fmtTime(enEnd)} — aligning the first `
         + `${cut} of ${enSents.length} sentences, the rest have no translation to show`);
-    const head = alignSentences(uaSents, enSents.slice(0, cut));
+    const head = align(uaSents, enSents.slice(0, cut));
     const tail = enSents.slice(cut).map((s) => ({ start: s.start, end: s.end, units: [] }));
     return head.concat(tail);
+  }
+
+  // A track with next to no sentence punctuation: the old ASR style, lowercase
+  // words and nothing else. Such a track can only be cut into sentences on
+  // silence. One home for the test, because two places act on it and they
+  // have to agree about which tracks they mean.
+  function unpunctuated(units) {
+    let marks = 0;
+    for (const u of units) if (endsSentence(u.text)) marks++;
+    return marks < units.length / 50;
+  }
+
+  // The translation placed by time alone: every unit goes under the source
+  // sentence whose window holds its onset. Used only when the SOURCE is
+  // unpunctuated. Its sentences are then cut on silence, so they are long and
+  // few, while YouTube's translation brings punctuation of its own. On
+  // iiVaMQAvnOY (93 min, 2026-11-04) that was 79 source sentences against 728
+  // translated ones. alignSentences pairs at most three of them per source
+  // sentence and hangs the other 517 on the previous sentence without asking
+  // the clock, so the translation drifted: only 38% of its units stood under
+  // the sentence they were spoken in, 7 sentences got nothing, and the
+  // 11-minute sentence 2 was one of them.
+  // Time is what both tracks share here: a translation carries the source
+  // events' own clock (measured on ikqTTXVRVog, 2026-08-04). Placed by it,
+  // iiVaMQAvnOY has no empty sentence at all. The price is the edge: 28 of 728
+  // translated sentences straddle a pause in the source and are cut there.
+  // The pointer only moves forward, so a unit whose onset runs backwards stays
+  // where it is read and never reorders the text.
+  function alignByTime(uaSents, enSents) {
+    const out = enSents.map((s) => ({ start: s.start, end: s.end, units: [] }));
+    if (!out.length) return out;
+    let k = 0;
+    for (const s of uaSents) {
+      for (const u of s.units) {
+        while (k + 1 < out.length && u.t >= out[k + 1].start) k++;
+        out[k].units.push(u);
+      }
+    }
+    return out;
   }
 
   // How far from the band's centre the pairing may wander. Flat again, and
@@ -2169,7 +2207,11 @@
     enLines = groupUnitsToLines(enUnits);
     sentences = buildSentences(enUnits);
     const uaSents = sameLang ? sentences : splitIntoSentences(uaUnits);
-    uaSentences = sameLang ? sentences : alignCovered(uaSents, sentences);
+    // Only a source with no punctuation of its own changes the method; every
+    // punctuated track takes the same path as before (see alignByTime).
+    const byTime = !sameLang && unpunctuated(enUnits);
+    if (byTime) dbg('source has no sentence punctuation — translation placed by time');
+    uaSentences = sameLang ? sentences : alignCovered(uaSents, sentences, byTime);
     uaLines = sameLang ? enLines : spreadToLines(uaSentences, sentences, enLines);
     // Both pairings describe the translation that was just replaced. loadCaptions
     // clears them too, but it is not the only way here: an interception can
