@@ -79,6 +79,7 @@
     // the click will do — open while the controls are on screen, struck
     // through once they are hidden.
     eye: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/></svg>',
+    compass: S + '<circle cx="10" cy="10" r="7.2"/><path d="M12.9 7.1 11.2 11.2 7.1 12.9 8.8 8.8Z"/></svg>',
     eyeOff: S + '<path d="M2.6 10S5.5 5.4 10 5.4s7.4 4.6 7.4 4.6-2.9 4.6-7.4 4.6S2.6 10 2.6 10Z"/><circle cx="10" cy="10" r="2.1"/><path d="M4.6 15.4 15.4 4.6"/></svg>',
     // The place we kept for you: shown on the button that returns to it.
     bookmark: S + '<path d="M5.6 3.6h8.8v12.8L10 12.9l-4.4 3.5Z"/></svg>',
@@ -3136,6 +3137,54 @@
     if (panel) panel.querySelectorAll('.ytds-menu.ytds-open').forEach((m) => m.classList.remove('ytds-open'));
   }
 
+  // ---- Where to start: channels that work well (channels.js) ----
+  const channels = () => globalThis.YTDS_CHANNELS || [];
+
+  // One channel as the compass menu and the empty-stage card show it. `full`
+  // adds the handle and the reason; the card has room for neither. The link
+  // opens a new tab, so whatever is being read here stays where it is.
+  function channelEntry(ch, full) {
+    const body = el('div', 'ytds-ch-body');
+    body.append(el('div', 'ytds-ch-name', ch.name));
+    if (full) body.append(el('div', 'ytds-ch-handle', ch.handle));
+    body.append(el('div', 'ytds-ch-about', ch.about));
+    if (full) {
+      const why = el('div', 'ytds-ch-why');
+      why.append(el('b', null, 'Why here:'), txt(' ' + ch.why));
+      body.append(why);
+    }
+    const link = el('a', 'ytds-ch-link', 'Open channel ↗');
+    link.href = ch.url;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.addEventListener('click', () => closeMenus());
+    body.append(link);
+    const row = el('div', 'ytds-ch');
+    row.append(el('div', 'ytds-ch-initials', ch.initials), body);
+    return row;
+  }
+
+  // The compass in the top bar's right group. Not mkMenu: that one picks a
+  // value and ticks it, this one only shows a list. The same classes, though,
+  // so closeMenus, a click elsewhere on the panel and Esc all close it already.
+  function mkChannelMenu() {
+    const wrap = el('div', 'ytds-menu-wrap');
+    const menu = el('div', 'ytds-menu ytds-below ytds-channels');
+    menu.appendChild(el('div', 'ytds-channels-head', 'Where to start'));
+    for (const ch of channels()) menu.appendChild(channelEntry(ch, true));
+    // Reading the reason is not a reason to close: the panel's click handler
+    // would, so a click inside stops here. The link closes it on its own.
+    menu.addEventListener('click', (e) => e.stopPropagation());
+    const btn = mkBtn('ytds-icon', 'Where to start', (e) => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains('ytds-open');
+      closeMenus();
+      if (!wasOpen) menu.classList.add('ytds-open');
+    }, icon('compass'));
+    wrap.append(btn, menu);
+    return wrap;
+  }
+
   // Own value picker instead of <select>: a native one drags YouTube's styles in.
   function mkMenu(opts) {
     const wrap = el('div', 'ytds-menu-wrap');
@@ -3224,6 +3273,7 @@
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
       buildSwatches(),
+      mkChannelMenu(),
       btnFocus,
       mkBtn('ytds-icon ytds-settings', 'Settings', openDrawer, icon('settings')),
       mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))

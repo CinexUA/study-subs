@@ -908,6 +908,53 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
 .ytds-menu button svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); color: var(--accent); }
 .ytds-menu.ytds-menu-text button { font: 500 calc(1.15 * var(--u)) / 1 var(--sans); }
 
+/* ---------- Where to start: the compass menu and the channel entry ----------
+   The compass lives in the RIGHT group, so its menu hangs from the button's
+   right edge; the top-bar rule above would hang it off the left edge and push
+   it past the screen. The entry is shared with the empty-stage card. */
+.ytds-top .ytds-right .ytds-menu.ytds-below { left: auto; right: 0; }
+.ytds-menu.ytds-channels { width: calc(26 * var(--u)); padding: calc(1 * var(--u)); }
+.ytds-channels-head {
+  margin: calc(.2 * var(--u)) 0 calc(.9 * var(--u));
+  font: 600 calc(.9 * var(--u)) / 1 var(--sans);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ytds-ch {
+  display: flex;
+  gap: calc(.9 * var(--u));
+  align-items: flex-start;
+  text-align: left;
+  font: 400 calc(1.05 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink);
+}
+.ytds-ch + .ytds-ch { margin-top: calc(1.2 * var(--u)); }
+.ytds-ch-initials {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: calc(2.8 * var(--u));
+  height: calc(2.8 * var(--u));
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: 700 calc(.95 * var(--u)) / 1 var(--sans);
+}
+.ytds-ch-name { font-weight: 600; }
+.ytds-ch-handle { color: var(--ink-3); font-size: .92em; }
+.ytds-ch-about, .ytds-ch-why { margin-top: calc(.35 * var(--u)); color: var(--ink-2); }
+.ytds-ch-why b { color: var(--ink); font-weight: 600; }
+.ytds-ch-link {
+  display: inline-block;
+  margin-top: calc(.5 * var(--u));
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.ytds-ch-link:hover { text-decoration: underline; }
+
 /* Scrubber: track grows on hover, sentence boundaries are the notches. */
 .ytds-scrub {
   position: relative;
