@@ -1,8 +1,9 @@
 /* The toolbar popup: the list of channels where the reader works as meant.
    It is an extension page, not the overlay, so there is no --u here and the
    sizes are plain pixels. The tone tokens are copied from content.css
-   (.ytds-panel.ytds-theme-*) so the popup wears the theme the reader is set to.
-   Change a colour there and it has to change here too. */
+   (.ytds-theme-*) so the popup wears the theme the reader is set to.
+   Change a colour there and it has to change here too, and list a new theme
+   in popup.js: one it does not list falls back to sepia. */
 
 body[data-theme="sepia"] {
   --bg: #e9dcc2;        --bg-elev: #f3e9d6;
@@ -21,6 +22,132 @@ body[data-theme="light"] {
   --ink: #1e1913;       --ink-2: #5b4f3f;   --ink-3: #90826e;
   --accent: #9a5518;    --accent-ink: #fffaf2;
   --line: #e0d6c4;      --bg-hover: rgba(154,85,24,.06);
+}
+body[data-theme="darcula"] {
+  --bg: #2b2b2b;        --bg-elev: #3c3f41;
+  --ink: #d0d9e2;       --ink-2: #a9b7c6;   --ink-3: #8a8f94;
+  --accent: #d8843c;    --accent-ink: #1e1f20;
+  --line: #4e5254;      --bg-hover: rgba(216,132,60,.1);
+}
+body[data-theme="monokai"] {
+  --bg: #272822;        --bg-elev: #33342c;
+  --ink: #f8f8f2;       --ink-2: #cfcfc2;   --ink-3: #908b74;
+  --accent: #fc4c88;    --accent-ink: #1e1f1c;
+  --line: #49483e;      --bg-hover: rgba(252,76,136,.1);
+}
+body[data-theme="dracula"] {
+  --bg: #282a36;        --bg-elev: #343746;
+  --ink: #f8f8f2;       --ink-2: #c3c6d8;   --ink-3: #8b93b8;
+  --accent: #bd93f9;    --accent-ink: #21222c;
+  --line: #44475a;      --bg-hover: rgba(189,147,249,.1);
+}
+body[data-theme="onedark"] {
+  --bg: #282c34;        --bg-elev: #31363f;
+  --ink: #d7dae0;       --ink-2: #abb2bf;   --ink-3: #7f8796;
+  --accent: #61afef;    --accent-ink: #1d2026;
+  --line: #3e4451;      --bg-hover: rgba(97,175,239,.1);
+}
+body[data-theme="nord"] {
+  --bg: #2e3440;        --bg-elev: #3b4252;
+  --ink: #eceff4;       --ink-2: #d8dee9;   --ink-3: #8f9bb3;
+  --accent: #88c0d0;    --accent-ink: #242933;
+  --line: #434c5e;      --bg-hover: rgba(136,192,208,.1);
+}
+body[data-theme="gruvbox"] {
+  --bg: #282828;        --bg-elev: #3c3836;
+  --ink: #ebdbb2;       --ink-2: #d5c4a1;   --ink-3: #a89984;
+  --accent: #fabd2f;    --accent-ink: #1d2021;
+  --line: #504945;      --bg-hover: rgba(250,189,47,.1);
+}
+body[data-theme="solarized-dark"] {
+  --bg: #002b36;        --bg-elev: #073642;
+  --ink: #c3cdcd;       --ink-2: #93a1a1;   --ink-3: #7a9197;
+  --accent: #b58900;    --accent-ink: #00212b;
+  --line: #164450;      --bg-hover: rgba(181,137,0,.1);
+}
+body[data-theme="solarized-light"] {
+  --bg: #fdf6e3;        --bg-elev: #fffbef;
+  --ink: #073642;       --ink-2: #4f6870;   --ink-3: #7c8f94;
+  --accent: #1f6fae;    --accent-ink: #fdf6e3;
+  --line: #ddd6c1;      --bg-hover: rgba(31,111,174,.07);
+}
+body[data-theme="latte"] {
+  --bg: #eff1f5;        --bg-elev: #ffffff;
+  --ink: #2a2b3d;       --ink-2: #4c4f69;   --ink-3: #7c7f93;
+  --accent: #8839ef;    --accent-ink: #ffffff;
+  --line: #ccd0da;      --bg-hover: rgba(136,57,239,.07);
+}
+body[data-theme="tokyonight"] {
+  --bg: #1a1b26;        --bg-elev: #24283b;
+  --ink: #c0caf5;       --ink-2: #a9b1d6;   --ink-3: #7c83ab;
+  --accent: #7aa2f7;    --accent-ink: #16161e;
+  --line: #3b4261;      --bg-hover: rgba(122,162,247,.1);
+}
+body[data-theme="rosepine"] {
+  --bg: #191724;        --bg-elev: #26233a;
+  --ink: #e0def4;       --ink-2: #c4c1de;   --ink-3: #908caa;
+  --accent: #ebbcba;    --accent-ink: #191724;
+  --line: #403d52;      --bg-hover: rgba(235,188,186,.1);
+}
+body[data-theme="rosepine-dawn"] {
+  --bg: #faf4ed;        --bg-elev: #fffaf3;
+  --ink: #3e3a5c;       --ink-2: #615d7d;   --ink-3: #86819b;
+  --accent: #286983;    --accent-ink: #faf4ed;
+  --line: #dfdad9;      --bg-hover: rgba(40,105,131,.07);
+}
+body[data-theme="everforest"] {
+  --bg: #2d353b;        --bg-elev: #343f44;
+  --ink: #e2d7bf;       --ink-2: #c9bda3;   --ink-3: #939f96;
+  --accent: #a7c080;    --accent-ink: #232a2e;
+  --line: #475258;      --bg-hover: rgba(167,192,128,.1);
+}
+body[data-theme="everforest-light"] {
+  --bg: #f3ead3;        --bg-elev: #fdf6e3;
+  --ink: #2f3a40;       --ink-2: #4d5a62;   --ink-3: #76837c;
+  --accent: #5a6b00;    --accent-ink: #fdf6e3;
+  --line: #ddd8be;      --bg-hover: rgba(90,107,0,.07);
+}
+body[data-theme="gruvbox-light"] {
+  --bg: #fbf1c7;        --bg-elev: #f9f5d7;
+  --ink: #3c3836;       --ink-2: #504945;   --ink-3: #7c6f64;
+  --accent: #9d0006;    --accent-ink: #fbf1c7;
+  --line: #d5c4a1;      --bg-hover: rgba(157,0,6,.07);
+}
+body[data-theme="onelight"] {
+  --bg: #fafafa;        --bg-elev: #ffffff;
+  --ink: #383a42;       --ink-2: #5c5f68;   --ink-3: #83858d;
+  --accent: #a626a4;    --accent-ink: #ffffff;
+  --line: #dbdbdc;      --bg-hover: rgba(166,38,164,.07);
+}
+body[data-theme="cobalt2"] {
+  --bg: #193549;        --bg-elev: #1f4662;
+  --ink: #ffffff;       --ink-2: #c5d4dd;   --ink-3: #8fa9bd;
+  --accent: #ffc600;    --accent-ink: #15232d;
+  --line: #2a5a7c;      --bg-hover: rgba(255,198,0,.1);
+}
+body[data-theme="synthwave"] {
+  --bg: #262335;        --bg-elev: #34294f;
+  --ink: #f4f1fa;       --ink-2: #cfc9e3;   --ink-3: #958fb3;
+  --accent: #ff7edb;    --accent-ink: #1e1a2e;
+  --line: #4a3f6b;      --bg-hover: rgba(255,126,219,.1);
+}
+body[data-theme="zenburn"] {
+  --bg: #3f3f3f;        --bg-elev: #4a4a4a;
+  --ink: #eeeedd;       --ink-2: #d0d0be;   --ink-3: #a8a898;
+  --accent: #8cd0d3;    --accent-ink: #2b2b2b;
+  --line: #5f5f5f;      --bg-hover: rgba(140,208,211,.1);
+}
+body[data-theme="contrast"] {
+  --bg: #000000;        --bg-elev: #1a1a1a;
+  --ink: #ffffff;       --ink-2: #e6e6e6;   --ink-3: #b3b3b3;
+  --accent: #ffd600;    --accent-ink: #000000;
+  --line: #8c8c8c;      --bg-hover: rgba(255,214,0,.1);
+}
+body[data-theme="paper"] {
+  --bg: #f4f1ea;        --bg-elev: #fbf9f4;
+  --ink: #111111;       --ink-2: #3d3d3d;   --ink-3: #6e6e6e;
+  --accent: #555555;    --accent-ink: #ffffff;
+  --line: #d8d3c8;      --bg-hover: rgba(85,85,85,.07);
 }
 
 body {

@@ -31,7 +31,11 @@ the captions into lines, so one sentence stays one sentence.
 - **Playback speed** 0.5×–2×, and a **scrubber whose notches are sentence
   boundaries** — clicking snaps to the start of a sentence, never into the middle.
 - **Remembers where you stopped** and offers to continue from that sentence.
-- **Translation language, text size (XS…XL) and theme** (Sepia / Dark / Light)
+- **Translation language, text size (XS…XL) and color scheme** — 24 of them: Sepia, Dark,
+  Light, High Contrast, Paper, and nineteen borrowed from code editors (Darcula, Monokai,
+  Dracula, One Dark and One Light, Nord, Gruvbox and Gruvbox Light, Solarized Dark and Light,
+  Catppuccin Latte, Tokyo Night, Rosé Pine and Rosé Pine Dawn, Everforest and Everforest Light,
+  Cobalt2, SynthWave 84, Zenburn)
   switch mid-video. The translation row hides with one click.
 - **Subtitles are cached on your device**, so re-watching needs no network request.
 - **Keyboard**: `Space` play/pause/replay, `←`/`→` previous / next sentence,

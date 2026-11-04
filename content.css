@@ -25,8 +25,12 @@
 
 /* ---------- Themes: tone tokens per theme, everything else consumes them ----------
    Not tied to .ytds-panel: a scheme's dot in the picker carries the same class
-   and paints itself from these tokens, so a new scheme is one block here and
-   one THEMES entry in content.js. */
+   and paints itself from these tokens, so the picker needs nothing per scheme.
+   A new scheme: a block here, an entry in THEMES (content.js and popup.js) and
+   a shorter copy in popup.css.
+   The editor-inspired ones keep their editor's background and signature colour,
+   but the reading pairs are moved where needed to clear: ink on bg 7:1,
+   accent (the translation line) on bg 4.5:1, accent-ink on accent 4.5:1. */
 .ytds-theme-sepia {
   --bg: #e9dcc2;        --bg-elev: #f3e9d6;
   --bg-sunken: #ddceb0; --bg-hover: rgba(138,75,18,.07);
@@ -64,6 +68,279 @@
   --shade: rgba(70,52,26,.14);
   --scrim: rgba(60,48,30,.38);
   --log-fg: #1a7f37;
+}
+
+.ytds-theme-darcula {
+  --bg: #2b2b2b;        --bg-elev: #3c3f41;
+  --bg-sunken: #232525; --bg-hover: rgba(216,132,60,.1);
+  --ink: #d0d9e2;       --ink-2: #a9b7c6;   --ink-3: #8a8f94;
+  --accent: #d8843c;    --accent-2: #e89d58;
+  --accent-ink: #1e1f20; --accent-wash: rgba(216,132,60,.16);
+  --line: #4e5254;      --line-2: rgba(208,217,226,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #6a8759;
+}
+
+.ytds-theme-monokai {
+  --bg: #272822;        --bg-elev: #33342c;
+  --bg-sunken: #1e1f1c; --bg-hover: rgba(252,76,136,.1);
+  --ink: #f8f8f2;       --ink-2: #cfcfc2;   --ink-3: #908b74;
+  --accent: #fc4c88;    --accent-2: #ff79a6;
+  --accent-ink: #1e1f1c; --accent-wash: rgba(252,76,136,.16);
+  --line: #49483e;      --line-2: rgba(248,248,242,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #a6e22e;
+}
+
+.ytds-theme-dracula {
+  --bg: #282a36;        --bg-elev: #343746;
+  --bg-sunken: #21222c; --bg-hover: rgba(189,147,249,.1);
+  --ink: #f8f8f2;       --ink-2: #c3c6d8;   --ink-3: #8b93b8;
+  --accent: #bd93f9;    --accent-2: #d4b8fb;
+  --accent-ink: #21222c; --accent-wash: rgba(189,147,249,.16);
+  --line: #44475a;      --line-2: rgba(248,248,242,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #50fa7b;
+}
+
+.ytds-theme-onedark {
+  --bg: #282c34;        --bg-elev: #31363f;
+  --bg-sunken: #21252b; --bg-hover: rgba(97,175,239,.1);
+  --ink: #d7dae0;       --ink-2: #abb2bf;   --ink-3: #7f8796;
+  --accent: #61afef;    --accent-2: #84c1f3;
+  --accent-ink: #1d2026; --accent-wash: rgba(97,175,239,.16);
+  --line: #3e4451;      --line-2: rgba(215,218,224,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #98c379;
+}
+
+.ytds-theme-nord {
+  --bg: #2e3440;        --bg-elev: #3b4252;
+  --bg-sunken: #272c36; --bg-hover: rgba(136,192,208,.1);
+  --ink: #eceff4;       --ink-2: #d8dee9;   --ink-3: #8f9bb3;
+  --accent: #88c0d0;    --accent-2: #a3d2de;
+  --accent-ink: #242933; --accent-wash: rgba(136,192,208,.16);
+  --line: #434c5e;      --line-2: rgba(236,239,244,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #a3be8c;
+}
+
+.ytds-theme-gruvbox {
+  --bg: #282828;        --bg-elev: #3c3836;
+  --bg-sunken: #1d2021; --bg-hover: rgba(250,189,47,.1);
+  --ink: #ebdbb2;       --ink-2: #d5c4a1;   --ink-3: #a89984;
+  --accent: #fabd2f;    --accent-2: #fcd36b;
+  --accent-ink: #1d2021; --accent-wash: rgba(250,189,47,.16);
+  --line: #504945;      --line-2: rgba(235,219,178,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #b8bb26;
+}
+
+.ytds-theme-solarized-dark {
+  --bg: #002b36;        --bg-elev: #073642;
+  --bg-sunken: #00212b; --bg-hover: rgba(181,137,0,.1);
+  --ink: #c3cdcd;       --ink-2: #93a1a1;   --ink-3: #7a9197;
+  --accent: #b58900;    --accent-2: #cfa018;
+  --accent-ink: #00212b; --accent-wash: rgba(181,137,0,.16);
+  --line: #164450;      --line-2: rgba(195,205,205,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #859900;
+}
+
+.ytds-theme-solarized-light {
+  --bg: #fdf6e3;        --bg-elev: #fffbef;
+  --bg-sunken: #eee8d5; --bg-hover: rgba(31,111,174,.07);
+  --ink: #073642;       --ink-2: #4f6870;   --ink-3: #7c8f94;
+  --accent: #1f6fae;    --accent-2: #2f86c8;
+  --accent-ink: #fdf6e3; --accent-wash: rgba(31,111,174,.1);
+  --line: #ddd6c1;      --line-2: rgba(7,54,66,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(7,54,66,.14);
+  --scrim: rgba(7,54,66,.38);
+  --log-fg: #5f7000;
+}
+
+.ytds-theme-latte {
+  --bg: #eff1f5;        --bg-elev: #ffffff;
+  --bg-sunken: #e6e9ef; --bg-hover: rgba(136,57,239,.07);
+  --ink: #2a2b3d;       --ink-2: #4c4f69;   --ink-3: #7c7f93;
+  --accent: #8839ef;    --accent-2: #9d5cf2;
+  --accent-ink: #ffffff; --accent-wash: rgba(136,57,239,.1);
+  --line: #ccd0da;      --line-2: rgba(42,43,61,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(42,43,61,.14);
+  --scrim: rgba(42,43,61,.38);
+  --log-fg: #40a02b;
+}
+
+.ytds-theme-tokyonight {
+  --bg: #1a1b26;        --bg-elev: #24283b;
+  --bg-sunken: #16161e; --bg-hover: rgba(122,162,247,.1);
+  --ink: #c0caf5;       --ink-2: #a9b1d6;   --ink-3: #7c83ab;
+  --accent: #7aa2f7;    --accent-2: #9ab8fa;
+  --accent-ink: #16161e; --accent-wash: rgba(122,162,247,.16);
+  --line: #3b4261;      --line-2: rgba(192,202,245,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #9ece6a;
+}
+
+.ytds-theme-rosepine {
+  --bg: #191724;        --bg-elev: #26233a;
+  --bg-sunken: #13111e; --bg-hover: rgba(235,188,186,.1);
+  --ink: #e0def4;       --ink-2: #c4c1de;   --ink-3: #908caa;
+  --accent: #ebbcba;    --accent-2: #f2d0ce;
+  --accent-ink: #191724; --accent-wash: rgba(235,188,186,.16);
+  --line: #403d52;      --line-2: rgba(224,222,244,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #9ccfd8;
+}
+
+.ytds-theme-rosepine-dawn {
+  --bg: #faf4ed;        --bg-elev: #fffaf3;
+  --bg-sunken: #f2e9e1; --bg-hover: rgba(40,105,131,.07);
+  --ink: #3e3a5c;       --ink-2: #615d7d;   --ink-3: #86819b;
+  --accent: #286983;    --accent-2: #3a7f9a;
+  --accent-ink: #faf4ed; --accent-wash: rgba(40,105,131,.1);
+  --line: #dfdad9;      --line-2: rgba(62,58,92,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(62,58,92,.14);
+  --scrim: rgba(62,58,92,.38);
+  --log-fg: #3e7d87;
+}
+
+.ytds-theme-everforest {
+  --bg: #2d353b;        --bg-elev: #343f44;
+  --bg-sunken: #272e33; --bg-hover: rgba(167,192,128,.1);
+  --ink: #e2d7bf;       --ink-2: #c9bda3;   --ink-3: #939f96;
+  --accent: #a7c080;    --accent-2: #bccf9c;
+  --accent-ink: #232a2e; --accent-wash: rgba(167,192,128,.16);
+  --line: #475258;      --line-2: rgba(226,215,191,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #83c092;
+}
+
+.ytds-theme-everforest-light {
+  --bg: #f3ead3;        --bg-elev: #fdf6e3;
+  --bg-sunken: #eae4ca; --bg-hover: rgba(90,107,0,.07);
+  --ink: #2f3a40;       --ink-2: #4d5a62;   --ink-3: #76837c;
+  --accent: #5a6b00;    --accent-2: #6f8200;
+  --accent-ink: #fdf6e3; --accent-wash: rgba(90,107,0,.1);
+  --line: #ddd8be;      --line-2: rgba(47,58,64,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(47,58,64,.14);
+  --scrim: rgba(47,58,64,.38);
+  --log-fg: #2f8a64;
+}
+
+.ytds-theme-gruvbox-light {
+  --bg: #fbf1c7;        --bg-elev: #f9f5d7;
+  --bg-sunken: #ebdbb2; --bg-hover: rgba(157,0,6,.07);
+  --ink: #3c3836;       --ink-2: #504945;   --ink-3: #7c6f64;
+  --accent: #9d0006;    --accent-2: #b8242a;
+  --accent-ink: #fbf1c7; --accent-wash: rgba(157,0,6,.1);
+  --line: #d5c4a1;      --line-2: rgba(60,56,54,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(60,56,54,.14);
+  --scrim: rgba(60,56,54,.38);
+  --log-fg: #79740e;
+}
+
+.ytds-theme-onelight {
+  --bg: #fafafa;        --bg-elev: #ffffff;
+  --bg-sunken: #eeeeef; --bg-hover: rgba(166,38,164,.07);
+  --ink: #383a42;       --ink-2: #5c5f68;   --ink-3: #83858d;
+  --accent: #a626a4;    --accent-2: #b83db6;
+  --accent-ink: #ffffff; --accent-wash: rgba(166,38,164,.1);
+  --line: #dbdbdc;      --line-2: rgba(56,58,66,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(56,58,66,.14);
+  --scrim: rgba(56,58,66,.38);
+  --log-fg: #50a14f;
+}
+
+.ytds-theme-cobalt2 {
+  --bg: #193549;        --bg-elev: #1f4662;
+  --bg-sunken: #122738; --bg-hover: rgba(255,198,0,.1);
+  --ink: #ffffff;       --ink-2: #c5d4dd;   --ink-3: #8fa9bd;
+  --accent: #ffc600;    --accent-2: #ffd84d;
+  --accent-ink: #15232d; --accent-wash: rgba(255,198,0,.16);
+  --line: #2a5a7c;      --line-2: rgba(255,255,255,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #3ad900;
+}
+
+.ytds-theme-synthwave {
+  --bg: #262335;        --bg-elev: #34294f;
+  --bg-sunken: #1e1a2e; --bg-hover: rgba(255,126,219,.1);
+  --ink: #f4f1fa;       --ink-2: #cfc9e3;   --ink-3: #958fb3;
+  --accent: #ff7edb;    --accent-2: #ffa3e6;
+  --accent-ink: #1e1a2e; --accent-wash: rgba(255,126,219,.16);
+  --line: #4a3f6b;      --line-2: rgba(244,241,250,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #72f1b8;
+}
+
+.ytds-theme-zenburn {
+  --bg: #3f3f3f;        --bg-elev: #4a4a4a;
+  --bg-sunken: #353535; --bg-hover: rgba(140,208,211,.1);
+  --ink: #eeeedd;       --ink-2: #d0d0be;   --ink-3: #a8a898;
+  --accent: #8cd0d3;    --accent-2: #a8dcdf;
+  --accent-ink: #2b2b2b; --accent-wash: rgba(140,208,211,.16);
+  --line: #5f5f5f;      --line-2: rgba(238,238,221,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #9fc59f;
+}
+
+.ytds-theme-contrast {
+  --bg: #000000;        --bg-elev: #1a1a1a;
+  --bg-sunken: #000000; --bg-hover: rgba(255,214,0,.1);
+  --ink: #ffffff;       --ink-2: #e6e6e6;   --ink-3: #b3b3b3;
+  --accent: #ffd600;    --accent-2: #ffe34d;
+  --accent-ink: #000000; --accent-wash: rgba(255,214,0,.16);
+  --line: #8c8c8c;      --line-2: rgba(255,255,255,.1);
+  --sheen: rgba(255,255,255,.06);
+  --shade: rgba(0,0,0,.55);
+  --scrim: rgba(0,0,0,.55);
+  --log-fg: #00ff7f;
+}
+
+.ytds-theme-paper {
+  --bg: #f4f1ea;        --bg-elev: #fbf9f4;
+  --bg-sunken: #e9e5dc; --bg-hover: rgba(85,85,85,.07);
+  --ink: #111111;       --ink-2: #3d3d3d;   --ink-3: #6e6e6e;
+  --accent: #555555;    --accent-2: #6b6b6b;
+  --accent-ink: #ffffff; --accent-wash: rgba(85,85,85,.1);
+  --line: #d8d3c8;      --line-2: rgba(17,17,17,.1);
+  --sheen: rgba(255,255,255,.80);
+  --shade: rgba(17,17,17,.14);
+  --scrim: rgba(17,17,17,.38);
+  --log-fg: #3d3d3d;
 }
 
 /* elevation + surfaces derived from the tone tokens above, shared everywhere */

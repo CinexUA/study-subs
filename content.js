@@ -12,7 +12,18 @@
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
     ['it', 'Italian'], ['ru', 'Russian']
   ];
-  const THEMES = [['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light']];
+  // The order is the picker's: four to a row. Each code has a tone block in
+  // content.css (.ytds-theme-<code>) and a shorter copy in popup.css, and is
+  // listed again in popup.js.
+  const THEMES = [
+    ['sepia', 'Sepia'], ['dark', 'Dark'], ['light', 'Light'], ['darcula', 'Darcula'],
+    ['monokai', 'Monokai'], ['dracula', 'Dracula'], ['onedark', 'One Dark'], ['nord', 'Nord'],
+    ['gruvbox', 'Gruvbox'], ['solarized-dark', 'Solarized Dark'], ['solarized-light', 'Solarized Light'],
+    ['latte', 'Catppuccin Latte'],
+    ['tokyonight', 'Tokyo Night'], ['rosepine', 'Rosé Pine'], ['rosepine-dawn', 'Rosé Pine Dawn'], ['everforest', 'Everforest'],
+    ['everforest-light', 'Everforest Light'], ['gruvbox-light', 'Gruvbox Light'], ['onelight', 'One Light'], ['cobalt2', 'Cobalt2'],
+    ['synthwave', 'SynthWave 84'], ['zenburn', 'Zenburn'], ['contrast', 'High Contrast'], ['paper', 'Paper'],
+  ];
   // Fine below 1×, where the listening actually happens; coarse above it.
   // 0.6/0.7/0.8/0.9 are off the player's own ladder, so they live on our
   // element write and the ratechange guard (see applySpeed).

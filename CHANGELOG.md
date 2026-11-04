@@ -30,6 +30,14 @@ guess at that.
   video with no subtitles at all, where the Dual subtitles button is greyed
   out, its tooltip now says to click the Study Subs icon for videos that
   work well.
+- **Twenty-one more color schemes, 24 in all.** Nineteen are borrowed from
+  code editors: Darcula, Monokai, Dracula, One Dark, One Light, Nord, Gruvbox,
+  Gruvbox Light, Solarized Dark, Solarized Light, Catppuccin Latte, Tokyo
+  Night, Rosé Pine, Rosé Pine Dawn, Everforest, Everforest Light, Cobalt2,
+  SynthWave 84 and Zenburn. Each keeps its editor's background and signature
+  colour, nudged where needed so both lines stay easy to read. Two are for
+  reading itself: High Contrast (white and yellow on black) and Paper (black
+  and grey, like an e-reader). The toolbar popup follows the scheme too.
 
 ### Changed
 

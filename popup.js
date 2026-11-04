@@ -5,7 +5,10 @@
 (() => {
   'use strict';
 
-  const THEMES = ['sepia', 'dark', 'light'];
+  const THEMES = ['sepia', 'dark', 'light',
+    'darcula', 'monokai', 'dracula', 'onedark', 'nord', 'gruvbox', 'solarized-dark', 'solarized-light', 'latte',
+    'tokyonight', 'rosepine', 'rosepine-dawn', 'everforest', 'everforest-light', 'gruvbox-light', 'onelight',
+    'cobalt2', 'synthwave', 'zenburn', 'contrast', 'paper'];
 
   // Read-only: the reader owns the `ytds` key. Outside the extension (the page
   // opened as a plain file) there is no storage, and sepia is the default.
