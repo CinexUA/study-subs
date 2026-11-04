@@ -23,8 +23,11 @@
   --aside-w: calc(30 * var(--u));   /* the transcript column, and the room it takes */
 }
 
-/* ---------- Themes: tone tokens per theme, everything else consumes them ---------- */
-.ytds-panel.ytds-theme-sepia {
+/* ---------- Themes: tone tokens per theme, everything else consumes them ----------
+   Not tied to .ytds-panel: a scheme's dot in the picker carries the same class
+   and paints itself from these tokens, so a new scheme is one block here and
+   one THEMES entry in content.js. */
+.ytds-theme-sepia {
   --bg: #e9dcc2;        --bg-elev: #f3e9d6;
   --bg-sunken: #ddceb0; --bg-hover: rgba(138,75,18,.07);
   --ink: #241d14;       --ink-2: #5a4a33;   --ink-3: #8d7a58;
@@ -37,7 +40,7 @@
   --log-fg: #5a6a2a;
 }
 
-.ytds-panel.ytds-theme-dark {
+.ytds-theme-dark {
   --bg: #171310;        --bg-elev: #221c16;
   --bg-sunken: #100d0a; --bg-hover: rgba(230,170,110,.09);
   --ink: #efe4d2;       --ink-2: #b9a992;   --ink-3: #8a7a66;
@@ -50,7 +53,7 @@
   --log-fg: #7fd18a;
 }
 
-.ytds-panel.ytds-theme-light {
+.ytds-theme-light {
   --bg: #f8f4ec;        --bg-elev: #ffffff;
   --bg-sunken: #efe8db; --bg-hover: rgba(154,85,24,.06);
   --ink: #1e1913;       --ink-2: #5b4f3f;   --ink-3: #90826e;
@@ -1259,31 +1262,38 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   box-shadow: none;
 }
 .ytds-text-btn[disabled]:hover { background-color: var(--bg); color: var(--ink-2); }
-/* Theme swatches: their own sunken tray in the top bar, next to the gear. */
-.ytds-swatches {
-  display: flex;
-  align-items: center;
-  gap: calc(.5 * var(--u));
-  padding: calc(.34 * var(--u));
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  background: var(--bg-sunken);
-  box-shadow: var(--press);
+/* Color schemes: one button in the top bar, every scheme in a grid under it.
+   A dot carries its scheme's class, so the var()s on the dot are that scheme's
+   and it paints itself from them; whatever sits around the dot — the button,
+   the ring — is still the panel's. */
+.ytds-dot {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--bg) 50%, var(--accent) 50%);
 }
-.ytds-swatch {
+.ytds-theme-btn .ytds-dot { width: 55%; height: 55%; box-shadow: 0 0 0 1px var(--line); }
+.ytds-menu.ytds-themes { min-width: 0; padding: calc(.9 * var(--u)); }
+.ytds-menu.ytds-themes.ytds-open {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 4), calc(1.9 * var(--u)));
+  gap: calc(.8 * var(--u));
+}
+/* Undoes the menu's own row-button look, hover background included. */
+.ytds-menu .ytds-swatch,
+.ytds-menu .ytds-swatch:hover {
+  display: block;
   width: calc(1.9 * var(--u));
   height: calc(1.9 * var(--u));
   padding: 0;
-  border: none;
   border-radius: 50%;
+  background: none;
   box-shadow: 0 0 0 1px var(--line);
   transition: transform var(--d2) var(--ease-spring), box-shadow var(--d2) var(--ease-out);
 }
-.ytds-swatch:hover { transform: scale(1.12); }
-.ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-sunken), 0 0 0 3px var(--accent); }
-.ytds-swatch-sepia { background: linear-gradient(135deg, #e9dcc2 50%, #8a4b12 50%); }
-.ytds-swatch-dark  { background: linear-gradient(135deg, #171310 50%, #d98f4d 50%); }
-.ytds-swatch-light { background: linear-gradient(135deg, #f8f4ec 50%, #9a5518 50%); }
+.ytds-menu .ytds-swatch:hover { transform: scale(1.12); }
+.ytds-menu .ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 3px var(--accent); }
 
 /* Sits in Advanced with the status line and the log, in the same monospace and
    the same quiet ink: it is read together with them, and copied with them. */

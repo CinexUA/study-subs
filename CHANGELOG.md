@@ -31,6 +31,13 @@ guess at that.
   out, its tooltip now says to click the Study Subs icon for videos that
   work well.
 
+### Changed
+
+- **Color schemes sit behind one button.** The three circles in the reader's
+  top bar are now a single button that shows the current scheme; clicking it
+  opens the schemes as a grid of circles, and picking one closes it. The top
+  bar no longer grows with every scheme added.
+
 ### Fixed
 
 - **The translation stays under its own sentence on videos whose subtitles

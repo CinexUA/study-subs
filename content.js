@@ -152,7 +152,7 @@
   let video = null;
   let panel, elStage, elZoneEn, elZoneUa, elNote, elNoteCard, elStatus, elLog, elCounter, elHint;
   let btnTailReset, inpTail, elTailVal, elTailReach;
-  let btnStudy, btnFocus, btnTranscript, btnVideo;
+  let btnStudy, btnFocus, btnTranscript, btnVideo, elThemeDot;
   // Video mode borrows the player's geometry and must give it back exactly.
   // null = we have not taken it; a string (possibly empty) = what was there.
   let playerStyleWas = null;
@@ -3296,7 +3296,7 @@
 
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
-      buildSwatches(),
+      mkThemeMenu(),
       mkChannelMenu(),
       btnFocus,
       mkBtn('ytds-icon ytds-settings', 'Settings', openDrawer, icon('settings')),
@@ -3981,15 +3981,31 @@
     return frag;
   }
 
-  function buildSwatches() {
-    const wrap = el('div', 'ytds-swatches');
+  // The color schemes behind one button, the way the compass keeps its list:
+  // a tray of swatches grows by a circle per scheme, and the top bar has no
+  // room for a row that keeps growing. The button wears the current scheme.
+  // Picking one closes the menu — it is set once, not browsed.
+  function mkThemeMenu() {
+    const wrap = el('div', 'ytds-menu-wrap');
+    const menu = el('div', 'ytds-menu ytds-below ytds-themes');
+    menu.style.setProperty('--cols', String(Math.min(4, THEMES.length)));
     for (const [code, label] of THEMES) {
-      const b = mkBtn('ytds-swatch ytds-swatch-' + code, label, () => {
+      const b = mkBtn('ytds-swatch', label, (e) => {
+        e.stopPropagation();
+        closeMenus();
         state.theme = code; saveState(); applyTheme(); syncUi();
-      });
+      }, el('span', 'ytds-dot ytds-theme-' + code));
       b.dataset.theme = code;
-      wrap.appendChild(b);
+      menu.appendChild(b);
     }
+    elThemeDot = el('span', 'ytds-dot');
+    const btn = mkBtn('ytds-icon ytds-theme-btn', 'Color scheme', (e) => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains('ytds-open');
+      closeMenus();
+      if (!wasOpen) menu.classList.add('ytds-open');
+    }, elThemeDot);
+    wrap.append(btn, menu);
     return wrap;
   }
 
@@ -4020,6 +4036,7 @@
     applyTheme();   // also carries the study/drawer state classes
     panel.querySelectorAll('[data-key]').forEach((b) => b.classList.toggle('ytds-on', !!state[b.dataset.key]));
     panel.querySelectorAll('.ytds-swatch').forEach((b) => b.classList.toggle('ytds-on', b.dataset.theme === state.theme));
+    if (elThemeDot) elThemeDot.className = 'ytds-dot ytds-theme-' + state.theme;
     const step = FONT_STEPS[fontStepIdx()][0];
     panel.querySelectorAll('.ytds-step-label').forEach((n) => { n.textContent = step; });
     // Never while it is being dragged: moving the handle under the hand that
