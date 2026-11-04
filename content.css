@@ -955,6 +955,30 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
 }
 .ytds-ch-link:hover { text-decoration: underline; }
 
+/* The same entry under the stage's note when the video has nothing to read. */
+.ytds-note-card {
+  align-self: center;
+  width: calc(26 * var(--u));
+  margin-top: calc(1.6 * var(--u));
+  padding: calc(1 * var(--u)) calc(1.2 * var(--u));
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--bg-elev);
+  box-shadow: var(--e2);
+}
+/* Over video the stage lets clicks through to the player; the card's link has
+   to take them, and it wears the film's colours, not the paper's. */
+.ytds-video .ytds-note-card {
+  pointer-events: auto;
+  border-color: transparent;
+  background: var(--vid-scrim);
+  box-shadow: none;
+}
+.ytds-video .ytds-note-card .ytds-ch,
+.ytds-video .ytds-note-card .ytds-ch-about,
+.ytds-video .ytds-note-card .ytds-channels-head { color: var(--vid-fg); }
+.ytds-video .ytds-note-card .ytds-ch-link { color: var(--vid-fg-2); }
+
 /* Scrubber: track grows on hover, sentence boundaries are the notches. */
 .ytds-scrub {
   position: relative;

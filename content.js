@@ -143,7 +143,7 @@
   let capturedBase = null, capturedBody = null, capturedTlang = '', capturedForVideo = null;
   let captureRetries = 0, sawTracks = false;
   let video = null;
-  let panel, elStage, elZoneEn, elZoneUa, elNote, elStatus, elLog, elCounter, elHint;
+  let panel, elStage, elZoneEn, elZoneUa, elNote, elNoteCard, elStatus, elLog, elCounter, elHint;
   let btnTailReset, inpTail, elTailVal, elTailReach;
   let btnStudy, btnFocus, btnTranscript, btnVideo;
   // Video mode borrows the player's geometry and must give it back exactly.
@@ -346,7 +346,13 @@
     elLog.scrollTop = elLog.scrollHeight;
   }
 
-  const setStatus = (msg) => { if (elStatus) elStatus.textContent = msg; };
+  // A dead end is a status that says there is nothing to read on this video and
+  // that asking again will not change it. Only those get the channel card under
+  // them (showPlaceholder); every other status, `loading…` and the rate-limit
+  // line included, clears the mark simply by being set.
+  let statusDeadEnd = false;
+  const setStatus = (msg) => { statusDeadEnd = false; if (elStatus) elStatus.textContent = msg; };
+  const setDeadEnd = (msg) => { setStatus(msg); statusDeadEnd = true; };
   const clearDisplay = () => {
     if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     if (elList) elList.textContent = '';
@@ -2196,7 +2202,7 @@
     if (!enClean.length) {
       availability = 'cues';
       dbg('every unit on this track is a sound cue — nothing to read here');
-      setStatus('these subtitles are only sound cues');
+      setDeadEnd('these subtitles are only sound cues');
       return true;
     }
     const enUnits = splitUnitsByPunct(enClean);
@@ -2387,7 +2393,7 @@
         (isLive ? ' · live stream' : '') + (answered ? '' : ' · the player never answered'));
     if (isLive) {
       dbg('live stream: no finished track to time against — not offering the reader');
-      setStatus('live streams have no finished subtitles yet');
+      setDeadEnd('live streams have no finished subtitles yet');
       return;
     }
     if (tracks.length) {
@@ -2417,7 +2423,7 @@
     // interception would turn something up.
     if (availability === 'none') {
       dbg('the player lists no caption tracks — nothing to enable, and nothing to wait for');
-      setStatus('this video has no YouTube captions');
+      setDeadEnd('this video has no YouTube captions');
       return;
     }
 
@@ -2475,10 +2481,10 @@
         // Not "switch CC off and on" any more: giving up restores the player's
         // captions to whatever they were before we asked, so half that
         // instruction can now be the half that does nothing.
-        setStatus('the player returned no captions — try toggling CC in the player, or reload the page');
+        setDeadEnd('the player returned no captions — try toggling CC in the player, or reload the page');
       } else {
         dbg('gave up: no caption tracks at all — the video likely has none');
-        setStatus('this video has no YouTube captions');
+        setDeadEnd('this video has no YouTube captions');
       }
     }, 25000);
   }
@@ -2990,12 +2996,19 @@
     }
   }
 
-  function hideNote() { if (elNote && elNote.style.display !== 'none') elNote.style.display = 'none'; }
+  function hideNote() {
+    if (elNote && elNote.style.display !== 'none') elNote.style.display = 'none';
+    if (elNoteCard && elNoteCard.style.display !== 'none') elNoteCard.style.display = 'none';
+  }
 
   // Shown in reader when there are no captions yet: surfaces the status/error.
   function showPlaceholder() {
     if (!elNote) return;
     const msg = (elStatus && elStatus.textContent) || 'loading captions…';
+    // Before the early return below: the mark can change while the text stays
+    // the same, and the card has to follow the mark.
+    const card = statusDeadEnd ? '' : 'none';
+    if (elNoteCard && elNoteCard.style.display !== card) elNoteCard.style.display = card;
     if (elNote.style.display !== 'none' && elNote.textContent === msg) return;
     if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     elNote.style.display = '';
@@ -3289,9 +3302,15 @@
     elZoneUa = el('div', 'ytds-zone ytds-zone-ua');
     elNote = el('div', 'ytds-note');
     elNote.style.display = 'none';
+    // Its own element next to the note, not inside it: showPlaceholder writes
+    // the note's textContent, which would wipe a card living in there.
+    elNoteCard = el('div', 'ytds-note-card');
+    elNoteCard.style.display = 'none';
+    elNoteCard.appendChild(el('div', 'ytds-channels-head', 'Videos that work well'));
+    for (const ch of channels()) elNoteCard.appendChild(channelEntry(ch, false));
 
     elStage = el('div', 'ytds-stage');
-    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, buildResumeCard());
+    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, elNoteCard, buildResumeCard());
 
     // One listener for the whole stage rather than one per phrase: the
     // sentence is rebuilt on every revealed word, and per-span listeners would
