@@ -12,6 +12,10 @@
   "minimum_chrome_version": "111",
   "permissions": ["storage", "unlimitedStorage"],
   "host_permissions": ["https://www.youtube.com/*"],
+  "action": {
+    "default_title": "Where to start",
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": ["https://www.youtube.com/*"],

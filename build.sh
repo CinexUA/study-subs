@@ -15,6 +15,8 @@ command -v zip >/dev/null || { echo "zip is not installed" >&2; exit 1; }
 # Syntax gate — the same check that runs before every commit.
 node --check content.js
 node --check injected.js
+node --check channels.js
+node --check popup.js
 echo "node --check ok"
 
 VERSION=$(python3 -c "import json; print(json.load(open('manifest.json'))['version'])")
@@ -29,6 +31,20 @@ for cs in m.get("content_scripts", []):
     out += cs.get("js", []) + cs.get("css", [])
 for p in m.get("web_accessible_resources", []):
     out += p.get("resources", [])
+popup = m.get("action", {}).get("default_popup")
+if popup:
+    out.append(popup)
+# A page the manifest names loads its own scripts and styles, and the manifest
+# never lists those. Read them off the page itself, local paths only, so a
+# script added to popup.html can't be left out of the package either.
+import os, re
+for page in [f for f in out if f.endswith(".html")]:
+    if not os.path.isfile(page):
+        continue
+    html = open(page, encoding="utf-8").read()
+    for ref in re.findall(r'<(?:script\b[^>]*\ssrc|link\b[^>]*\shref)="([^"]+)"', html):
+        if not re.match(r"^(?:[a-z]+:|//)", ref):
+            out.append(ref)
 seen = set()
 for f in out:
     if f not in seen:

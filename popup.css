@@ -1,0 +1,75 @@
+/* The toolbar popup: the list of channels where the reader works as meant.
+   It is an extension page, not the overlay, so there is no --u here and the
+   sizes are plain pixels. The tone tokens are copied from content.css
+   (.ytds-panel.ytds-theme-*) so the popup wears the theme the reader is set to.
+   Change a colour there and it has to change here too. */
+
+body[data-theme="sepia"] {
+  --bg: #e9dcc2;        --bg-elev: #f3e9d6;
+  --ink: #241d14;       --ink-2: #5a4a33;   --ink-3: #8d7a58;
+  --accent: #8a4b12;    --accent-ink: #fdf7ec;
+  --line: #c8b78f;      --bg-hover: rgba(138,75,18,.07);
+}
+body[data-theme="dark"] {
+  --bg: #171310;        --bg-elev: #221c16;
+  --ink: #efe4d2;       --ink-2: #b9a992;   --ink-3: #8a7a66;
+  --accent: #d98f4d;    --accent-ink: #1a1209;
+  --line: #3b3128;      --bg-hover: rgba(230,170,110,.09);
+}
+body[data-theme="light"] {
+  --bg: #f8f4ec;        --bg-elev: #ffffff;
+  --ink: #1e1913;       --ink-2: #5b4f3f;   --ink-3: #90826e;
+  --accent: #9a5518;    --accent-ink: #fffaf2;
+  --line: #e0d6c4;      --bg-hover: rgba(154,85,24,.06);
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+h1 {
+  margin: 0 0 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+li {
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-elev);
+}
+.initials {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 700;
+  font-size: 12px;
+}
+.name { font-weight: 600; }
+.handle { color: var(--ink-3); font-size: 12px; }
+.about, .why { margin: 4px 0 0; color: var(--ink-2); }
+.why b { color: var(--ink); font-weight: 600; }
+a {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+a:hover { text-decoration: underline; }
