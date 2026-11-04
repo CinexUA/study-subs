@@ -253,6 +253,15 @@
   transition: opacity var(--d4) var(--ease-out);
 }
 .ytds-hint-on { opacity: 1; }
+/* A hint too long for one line (the one about subtitles with no full stops)
+   wraps instead of running off a narrow window. */
+.ytds-hint.ytds-hint-wrap {
+  white-space: normal;
+  width: max-content;
+  max-width: min(calc(60 * var(--u)), 90%);
+  text-align: center;
+  line-height: 1.3;
+}
 
 /* Segmented tray: a sunken pill holding two or three related controls. */
 .ytds-seg {

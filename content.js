@@ -2206,6 +2206,9 @@
       return true;
     }
     const enUnits = splitUnitsByPunct(enClean);
+    // Asked of the source alone, translation or not: with no full stops the
+    // sentences run long whatever language sits under them (see hintNoStops).
+    noStopsVideo = unpunctuated(enUnits) ? currentVideoId : null;
     const uaUnits = sameLang ? enUnits : splitUnitsByPunct(dropCues(uaRaw));
     wordLevel = wordLevelTrack(enUnits);
 
@@ -2248,6 +2251,7 @@
     ensureTranscript();
     if (state.reader && state.study) armStudy();
     offerResume();  // the first moment sentences exist for this video
+    hintNoStops();
     return true;
   }
 
@@ -4114,6 +4118,26 @@
   // A line that says itself and leaves. Used where silence would read as a
   // bug: focus mode hiding the whole interface (and the way back with it), or
   // a translation that never arrived.
+  // Subtitles with no full stops (old-style ASR) can only be cut into sentences
+  // on silence, so a sentence there can run for minutes: iiVaMQAvnOY has one of
+  // 1,247 words. Said once per video, when the reader is open to hear it,
+  // whichever comes last — the captions or the opening — and remembered only
+  // for this page: finishBuild may run twice in one load, and the hint must not.
+  const NO_STOPS_HINT = 'These subtitles have no full stops, so sentences run long. The compass at the top has channels that work well.';
+  const NO_STOPS_MS = 6000;
+  let noStopsVideo = null, noStopsHinted = null, noStopsTimer = null;
+  function hintNoStops() {
+    if (!state.reader || !elHint || !noStopsVideo || noStopsVideo !== currentVideoId) return;
+    if (noStopsHinted === currentVideoId) return;
+    noStopsHinted = currentVideoId;
+    // Too long for one line on a narrow window: this hint is allowed to wrap,
+    // for as long as it is the one on screen.
+    elHint.classList.add('ytds-hint-wrap');
+    showHint(NO_STOPS_HINT, NO_STOPS_MS);
+    clearTimeout(noStopsTimer);
+    noStopsTimer = setTimeout(() => elHint.classList.remove('ytds-hint-wrap'), NO_STOPS_MS + 400);
+  }
+
   function showHint(msg, ms = 2200) {
     if (!elHint) return;
     elHint.textContent = msg;
@@ -4193,6 +4217,7 @@
     // captions anyway — the player may well have been switched on by its owner.
     if (pokePending && !captionsReady && !awaitingCapture) pokePlayer();
     offerResume();  // captions may have been ready long before the overlay
+    hintNoStops();
     startLoop();
     saveState();    // last: by now nothing it does can keep the overlay shut
   }

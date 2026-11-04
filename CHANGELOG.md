@@ -16,6 +16,18 @@ guess at that.
 
 ## Unreleased
 
+### Added
+
+- **Where to start: channels where the reader works as meant.** The first
+  video a newcomer opens is often the wrong one for this: no subtitles, or
+  subtitles without full stops, and then the extension looks broken when the
+  video is the problem. The extension now points at channels whose subtitles
+  have full stops and timing for every word (English Avenue, for now) in
+  four places: clicking the extension's icon in the toolbar, which used to do
+  nothing; a compass button in the reader's top bar; a card under the
+  message when a video has nothing to read; and, once per video, a hint when
+  the subtitles have no full stops and the sentences will run long.
+
 ### Fixed
 
 - **The translation stays under its own sentence on videos whose subtitles
