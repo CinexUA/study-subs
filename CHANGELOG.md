@@ -84,6 +84,12 @@ guess at that.
   now goes under the sentence it is spoken in. Videos whose subtitles have
   punctuation are not affected.
 
+- **The Transcript button works again after you change the translation
+  language.** If the transcript was closed when you picked another language,
+  the button went dead: it looked the same but did nothing until something
+  else in the reader was clicked. The same could happen if you opened the
+  reader before the subtitles had finished loading.
+
 ## 1.4.1 — 2026-09-21
 
 ### Fixed

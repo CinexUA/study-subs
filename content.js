@@ -2309,6 +2309,7 @@
     // one place both paths meet, cached and fetched, so the list cannot end up
     // disagreeing with the stage about what a sentence is.
     listBuilt = false; listIdx = -1;
+    syncListButton();
     ensureTranscript();
     if (state.reader && state.study) armStudy();
     offerResume();  // the first moment sentences exist for this video
@@ -3498,6 +3499,18 @@
     }));
   }
 
+  // Nothing to list, nothing to press — the same answer the pill gives on a
+  // video with no captions, rather than opening an empty panel. Never while a
+  // long list is being built, or this would re-enable the button mid-build.
+  //
+  // Asked in two places: syncUi, and finishBuild where the sentences arrive.
+  // The second is not a spare. Picking a language runs syncUi while the new
+  // track is still loading, so the button goes off; with the panel closed,
+  // nothing else would ever switch it back on.
+  function syncListButton() {
+    if (btnTranscript && !listBuilding) btnTranscript.disabled = !sentences.length;
+  }
+
   function setListBusy(on) {
     if (!btnTranscript) return;
     btnTranscript.classList.toggle('ytds-busy', on);
@@ -4238,10 +4251,7 @@
     if (btnTailReset) btnTailReset.disabled = !PLAYBACK_KEYS.some((k) => state[k] !== DEFAULTS[k]);
     for (const m of menus) m.sync();
     if (btnFocus) setIcon(btnFocus, state.focus ? 'eyeOff' : 'eye');
-    // Nothing to list, nothing to press — the same answer the pill gives on a
-    // video with no captions, rather than opening an empty panel. Never while a
-    // long list is being built, or syncUi would re-enable the button mid-build.
-    if (btnTranscript && !listBuilding) btnTranscript.disabled = !sentences.length;
+    syncListButton();
     ensureTranscript();
     applyVideoMode();
     renderKeys();
