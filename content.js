@@ -127,12 +127,19 @@
   // is dead for the first seconds of every video is a worse lie than one that
   // opens onto "loading…". Nothing here touches the player's CC.
   let availability = 'unknown';   // unknown | ready | none | live
+  // The tooltip of a greyed-out button is where a newcomer learns the reader
+  // will not open here, so the two dead ends point at the toolbar popup, which
+  // lists channels that work well (channels.js). The button itself stays a
+  // plain disabled button: a grey control that opened a list would contradict
+  // itself, and it lives in YouTube's own row. A live stream keeps its own
+  // advice: its recording will work.
+  const SEE_CHANNELS = ' For videos that work well, click the Study Subs icon in the toolbar.';
   const WHY_BLOCKED = {
-    none: 'This video has no subtitles — nothing to read here',
+    none: 'This video has no subtitles — nothing to read here.' + SEE_CHANNELS,
     live: 'Live streams have no finished subtitles yet — try the recording afterwards',
     // Formally there are subtitles here, so "no subtitles" would read as a
     // broken extension rather than as a video with nothing to say.
-    cues: 'These subtitles are only sound cues like [Music] — nothing to read here'
+    cues: 'These subtitles are only sound cues like [Music] — nothing to read here.' + SEE_CHANNELS
   };
   const blockedWhy = () => WHY_BLOCKED[availability] || '';
   // Live wins over everything: a stream can carry a caption track and still be

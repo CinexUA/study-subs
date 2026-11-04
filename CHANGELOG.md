@@ -26,7 +26,10 @@ guess at that.
   four places: clicking the extension's icon in the toolbar, which used to do
   nothing; a compass button in the reader's top bar; a card under the
   message when a video has nothing to read; and, once per video, a hint when
-  the subtitles have no full stops and the sentences will run long.
+  the subtitles have no full stops and the sentences will run long. On a
+  video with no subtitles at all, where the Dual subtitles button is greyed
+  out, its tooltip now says to click the Study Subs icon for videos that
+  work well.
 
 ### Fixed
 
