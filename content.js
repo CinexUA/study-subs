@@ -6,7 +6,14 @@
   'use strict';
 
   const THROTTLE_KEY = 'ytdscap-throttle';   // { until, rung }: the back-off in progress, if any
-  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', fontScale: 1, reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300, reveal: true, prevLine: false };
+  // The text settings (fontScale and below) are the ones a new install starts
+  // with and Reset returns to: S in the reader, XXS over video, words shown a
+  // line at a time, the text at 15% of the frame. Settings saved before the
+  // text menu existed keep their look (see the storage load below).
+  const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300,
+    fontScale: 0.8, reveal: false, prevLine: false,
+    vidFontScale: 0.52, textFont: 'default', textWidth: 100,
+    subBand: false, subOpacity: 60, subLift: 15, subOutline: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -34,6 +41,28 @@
   // to caption. The existing five keep their values, so a saved scale still
   // means what it meant (fontStepIdx snaps to the nearest step anyway).
   const FONT_STEPS = [['MIN', 0.4], ['XXS', 0.52], ['XS', 0.65], ['S', 0.8], ['M', 1], ['L', 1.25], ['XL', 1.55]];
+  // Subtitle faces: [code, name, file, fallback]. Default is the reading face
+  // the overlay always had — a system stack, so it differs by OS. The others
+  // ship in fonts/ (OFL, cut by tools/make-fonts.py, each named in
+  // manifest.json) and look the same everywhere; while one loads, or if it
+  // fails, its own kind of system face stands in.
+  const FONTS = [
+    ['default', 'Default', null, 'var(--serif)'],
+    ['literata', 'Literata', 'fonts/literata.woff2', 'var(--serif)'],
+    ['inter', 'Inter', 'fonts/inter.woff2', 'var(--sans)'],
+    ['andika', 'Andika', 'fonts/andika.woff2', 'var(--sans)'],
+    ['mono', 'JetBrains Mono', 'fonts/jetbrains-mono.woff2', 'var(--mono)'],
+  ];
+  // The reading column, in percent of the stage. Below 40 a sentence breaks
+  // into a word or two per row, which is a list, not a line.
+  const TEXT_WIDTH_MIN = 40;
+  // How high the text may go over video, in percent of the frame from its
+  // bottom. Higher than this it meets the top bar.
+  const SUB_LIFT_MAX = 85;
+  // What Reset text settings returns to DEFAULTS: what the menu shows in the
+  // mode you are in, and nothing of the other one.
+  const TEXT_KEYS_READER = ['fontScale', 'textFont', 'reveal', 'prevLine', 'textWidth'];
+  const TEXT_KEYS_VIDEO = ['vidFontScale', 'textFont', 'reveal', 'prevLine', 'subBand', 'subOpacity', 'subLift', 'subOutline'];
   // How long study mode keeps playing past the point where the last word is
   // ESTIMATED to end — see sentenceStop. Typed in, not picked from a ladder:
   // the right value is a property of the speaker, and finding it is a matter
@@ -99,7 +128,9 @@
     // paragraph and not as a list of settings.
     list: S + '<path d="M4.4 6.2h11.2M4.4 10h11.2M4.4 13.8h7"/></svg>',
     // Video mode: the picture comes back, and the text sits on it.
-    screen: S + '<rect x="3" y="4.4" width="14" height="9.6" rx="2.2"/><path d="M7.4 16.8h5.2"/></svg>'
+    screen: S + '<rect x="3" y="4.4" width="14" height="9.6" rx="2.2"/><path d="M7.4 16.8h5.2"/></svg>',
+    // The text menu: a capital and a small letter, the usual sign for type.
+    text: S + '<path d="M2.6 15.5 7 4.5l4.4 11M4.3 11.7h5.4M17.4 9.6v5.9"/><ellipse cx="15.1" cy="12.7" rx="2.3" ry="2.7"/></svg>'
   };
 
   let state = { ...DEFAULTS };
@@ -188,6 +219,7 @@
   let sleepPt = null;         // where it was when the interface hid
   let elControls, elPlay, elMute, elTime, elFill, elBuffer, elTicks, elBubble, elScrub, elKeys;
   const menus = [];   // value pickers (speed, language) that syncUi() refreshes
+  const fontLoads = new Map();   // bundled face code -> its load, once per page (ensureFont)
   let rafId = null;
   // Shadowing: sentence boundaries (from EN units), current sentence, and the
   // time at which playback should stop (null = free play).
@@ -276,6 +308,17 @@
   chrome.storage.local.get('ytds', (r) => {
     if (r.ytds) state = { ...state, ...r.ytds };
     state.reader = false; // never start a page already in reader mode
+    // Settings saved before the text menu: over video the size becomes its
+    // own, so it starts at the size the reader already had, and the scrim and
+    // the height stay as they were. New defaults are for new installs and for
+    // Reset, not a change anyone who already uses this wakes up to.
+    if (r.ytds && r.ytds.vidFontScale == null) {
+      state.vidFontScale = state.fontScale;
+      state.subOpacity = 58;
+      state.subLift = null;
+    }
+    // A face that is no longer shipped falls back rather than naming nothing.
+    if (!FONTS.some((f) => f[0] === state.textFont)) state.textFont = DEFAULTS.textFont;
     // A speed saved before the ladder changed (0.75×) would sit in the menu
     // with nothing ticked: snap it to the nearest step we now offer.
     if (!SPEEDS.some((v) => Math.abs(v - state.speed) < 0.001)) {
@@ -3019,6 +3062,8 @@
   }
 
   function hideNote() {
+    // The band over video has nothing to stand behind until there is text.
+    if (elStage && elStage.classList.contains('ytds-empty')) elStage.classList.remove('ytds-empty');
     if (elNote && elNote.style.display !== 'none') elNote.style.display = 'none';
     if (elNoteCard && elNoteCard.style.display !== 'none') elNoteCard.style.display = 'none';
   }
@@ -3031,6 +3076,7 @@
     // the same, and the card has to follow the mark.
     const card = statusDeadEnd ? '' : 'none';
     if (elNoteCard && elNoteCard.style.display !== card) elNoteCard.style.display = card;
+    if (elStage && !elStage.classList.contains('ytds-empty')) elStage.classList.add('ytds-empty');
     if (elNote.style.display !== 'none' && elNote.textContent === msg) return;
     if (elZoneEn) { elZoneEn.textContent = ''; elZoneUa.textContent = ''; }
     elNote.style.display = '';
@@ -3157,7 +3203,7 @@
 
   function toggleKey(key) { state[key] = !state[key]; saveState(); syncUi(); }
 
-  // A− / step / A+ tray in the top bar.
+  // A− / step / A+ tray, at the top of the text menu (mkTextMenu).
   function mkFontSeg() {
     const seg = el('div', 'ytds-seg');
     seg.append(
@@ -3255,7 +3301,13 @@
   function ensurePanel() {
     if (panel) return true;
     panel = el('div', 'ytds-panel ytds-theme-' + state.theme);
-    panel.addEventListener('click', closeMenus);
+    panel.addEventListener('click', (e) => {
+      // Video swaps half of the text menu for the other half, and the swap is
+      // the thing to see — so that one click leaves the text menu open.
+      const keep = e.target && e.target.closest && e.target.closest('[data-key="videoMode"]');
+      if (!keep) { closeMenus(); return; }
+      panel.querySelectorAll('.ytds-menu.ytds-open:not(.ytds-textmenu)').forEach((m) => m.classList.remove('ytds-open'));
+    });
     // Focus mode hides the chrome until the mouse says otherwise. The listener
     // is on the panel and never swallows the event, so nothing else that
     // watches for pointer movement is affected.
@@ -3299,19 +3351,27 @@
     btnTranscript.dataset.key = 'transcript';
 
     const left = el('div', 'ytds-top-side');
-    left.append(segLang, mkLangMenu(), mkFontSeg(), btnStudy, btnVideo, btnTranscript);
+    left.append(segLang, mkLangMenu(), btnStudy, btnVideo, btnTranscript);
 
     btnFocus = mkBtn('ytds-icon ytds-focus-btn', 'Focus mode: hide everything but the text (move the mouse to bring it back)',
       () => { toggleKey('focus'); if (state.focus) showHint('Move the mouse to bring the controls back'); }, icon('eye'));
     btnFocus.dataset.key = 'focus';
 
+    // Three groups, from what is touched while watching to what is touched
+    // once: how the screen looks (text, colors, focus), where to start and the
+    // settings, then the way out — last, where a window keeps its close button.
+    // A wider gap opens each group after the first (.ytds-group-start).
+    const compass = mkChannelMenu();
+    compass.classList.add('ytds-group-start');
+    const btnExit = mkBtn('ytds-icon ytds-group-start', 'Exit (Esc)', exitReader, icon('close'));
     const right = el('div', 'ytds-top-side ytds-right');
     right.append(
+      mkTextMenu(),
       mkThemeMenu(),
-      mkChannelMenu(),
       btnFocus,
+      compass,
       mkBtn('ytds-icon ytds-settings', 'Settings', openDrawer, icon('settings')),
-      mkBtn('ytds-icon', 'Exit (Esc)', exitReader, icon('close'))
+      btnExit
     );
 
     const top = el('div', 'ytds-top');
@@ -3331,7 +3391,7 @@
     elNoteCard.appendChild(el('div', 'ytds-channels-head', 'Videos that work well'));
     for (const ch of channels()) elNoteCard.appendChild(channelEntry(ch, false));
 
-    elStage = el('div', 'ytds-stage');
+    elStage = el('div', 'ytds-stage ytds-empty');
     elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, elNoteCard, buildResumeCard());
 
     // One listener for the whole stage rather than one per phrase: the
@@ -3350,6 +3410,10 @@
       lightChunk(null);
     });
     elStage.addEventListener('mouseleave', () => lightChunk(null));
+    // The text's height over video is measured from where the layout puts it,
+    // and that moves whenever the stage does: the shadowing row coming and
+    // going, a window resize, Video on or off.
+    if (typeof ResizeObserver === 'function') new ResizeObserver(() => applyLift()).observe(elStage);
     return elStage;
   }
 
@@ -3737,53 +3801,6 @@
     ];
   }
 
-  // The reveal, as a control. It belongs in the drawer rather than beside the
-  // mode pills for the reason written over buildDrawer: this is set once, to
-  // taste, and never touched again while watching — and there is a taste to
-  // settle, because the reveal answers "hear it first, read it after" while
-  // reading ahead of the speaker is a perfectly good way to use subtitles.
-  // One button, lit when on: the same language the mode pills speak.
-  function buildTextGroup() {
-    const row = el('div', 'ytds-btn-row');
-    const btn = mkBtn('ytds-pill ytds-pill-text',
-      'Let the words arrive as they are spoken, instead of a whole line at once',
-      () => {
-        toggleKey('reveal');
-        // In the log because this is a setting whose effect is easy to mistake
-        // for a track that simply has no word times — the two look identical.
-        dbg(`reveal ${state.reveal ? 'on' : 'off'} (${wordLevel ? 'word-level' : 'line-level'} track)`);
-      }, icon('study'), el('span', null, 'Word by word'));
-    btn.dataset.key = 'reveal';   // syncUi lights every [data-key] from state
-    row.appendChild(btn);
-
-    // The line that has just gone by, kept above the current one at 40%. It
-    // shipped as the only way free reading ever looked; off by default now,
-    // because the half-lit copy of a line you have already read is one more
-    // thing on screen for everyone who does not want it back.
-    const prevRow = el('div', 'ytds-btn-row');
-    const btnPrev = mkBtn('ytds-pill ytds-pill-text',
-      'Keep the line that just went by on screen, dimmed, above the current one',
-      () => toggleKey('prevLine'), icon('list'), el('span', null, 'Keep it on screen'));
-    btnPrev.dataset.key = 'prevLine';
-    prevRow.appendChild(btnPrev);
-
-    return [
-      el('div', 'ytds-setting-label', 'Text appears'),
-      row,
-      el('div', 'ytds-setting-note',
-        `Words arrive as the speaker says them, and a pause in the talk is a `
-        + `pause on screen. Turn it off to read ahead: each line is then there `
-        + `in full the moment it starts, the way it used to be.`),
-      el('div', 'ytds-setting-label', 'Previous line'),
-      prevRow,
-      el('div', 'ytds-setting-note',
-        `The line before the current one stays above it, dimmed, so a sentence `
-        + `you did not finish is still there to read. Off by default: it puts `
-        + `two lines of each language on screen instead of one. Free reading `
-        + `only — study mode always holds a single sentence.`)
-    ];
-  }
-
   // The filled stretch behind the handle, as a percentage of the range. A
   // ::-webkit-slider-runnable-track cannot see the input's value, so the value
   // has to be handed to it — and from both places the handle can move: a drag
@@ -3972,8 +3989,6 @@
     body.append(
       group('Playback', 'pause'),
       ...buildPlaybackGroup(),
-      group('Text', 'study'),
-      ...buildTextGroup(),
       group('Advanced', 'console'),
       ...(tag ? [el('div', 'ytds-ver', tag)] : []),
       elStatus,
@@ -4016,6 +4031,159 @@
       closeMenus();
       if (!wasOpen) menu.classList.add('ytds-open');
     }, elThemeDot);
+    wrap.append(btn, menu);
+    return wrap;
+  }
+
+  // A slider in the text menu. The look follows the handle on every pixel of
+  // a drag; storage is written once, on release. Then the handle lets go of
+  // focus: a focused range input owns the arrows and Space (isTyping), and
+  // after a drag they would move the handle instead of the sentences.
+  function mkSlider(o) {
+    const inp = document.createElement('input');
+    inp.type = 'range';
+    inp.className = 'ytds-range';
+    inp.min = String(o.min);
+    inp.max = String(o.max);
+    inp.step = '1';
+    inp.title = o.title;
+    const val = el('span', 'ytds-field-unit ytds-field-val');
+    const paint = () => {
+      const v = Number(inp.value);
+      inp.style.setProperty('--fill', `${((v - o.min) / (o.max - o.min)) * 100}%`);
+      val.textContent = v + ' %';
+    };
+    inp.addEventListener('input', () => { o.set(Number(inp.value)); paint(); });
+    inp.addEventListener('change', () => { saveState(); inp.blur(); syncUi(); });
+    const field = el('div', 'ytds-field');
+    field.append(inp, val);
+    const sync = () => {
+      if (document.activeElement !== inp) inp.value = String(o.get());
+      paint();
+    };
+    return { field, sync };
+  }
+
+  // How the subtitle text looks, behind one button the way the schemes are.
+  // Unlike the schemes the menu stays open while things change: the text
+  // behind it is the preview, and a size or a height is found by trying. It
+  // holds what applies to the mode you are in; the other mode's half is hidden
+  // by CSS, so switching Video with the menu open swaps it in place.
+  function mkTextMenu() {
+    const wrap = el('div', 'ytds-menu-wrap');
+    const menu = el('div', 'ytds-menu ytds-below ytds-textmenu');
+    // A click inside adjusts, it does not dismiss: the panel's own click
+    // handler would close the menu on the first press.
+    menu.addEventListener('click', (e) => e.stopPropagation());
+    const label = (t) => el('div', 'ytds-tm-label', t);
+
+    const fontList = el('div', 'ytds-rows');
+    const fontBtns = FONTS.map(([code, name]) => {
+      const face = el('span', null, name);
+      face.style.fontFamily = fontStack(code);
+      const b = mkBtn('', '', () => { state.textFont = code; saveState(); syncUi(); }, face, icon('check'));
+      b.dataset.font = code;
+      fontList.appendChild(b);
+      return b;
+    });
+
+    // Word by word and Previous line lived in the drawer's Text group until the
+    // menu came; they are how the text looks as much as the face is, and a
+    // second place to look for that was one too many. Their long notes became
+    // tooltips — the effect is on screen the moment either is pressed.
+    // The reveal is a setting because it answers "hear it first, read it
+    // after", while reading ahead of the speaker is a good way to use
+    // subtitles too. The previous line is off by default: a half-lit copy of
+    // a line already read is one more thing on screen for everyone who does
+    // not want it back.
+    const btnReveal = mkBtn('ytds-pill ytds-pill-text',
+      'Let the words arrive as they are spoken. Off: each line is there in full the moment it starts',
+      () => {
+        toggleKey('reveal');
+        // In the log because this is a setting whose effect is easy to mistake
+        // for a track that simply has no word times — the two look identical.
+        dbg(`reveal ${state.reveal ? 'on' : 'off'} (${wordLevel ? 'word-level' : 'line-level'} track)`);
+      }, el('span', null, 'Word by word'));
+    btnReveal.dataset.key = 'reveal';
+    const btnPrev = mkBtn('ytds-pill ytds-pill-text', '', () => toggleKey('prevLine'), el('span', null, 'Previous line'));
+    btnPrev.dataset.key = 'prevLine';
+    const showRow = el('div', 'ytds-btn-row');
+    showRow.append(btnReveal, btnPrev);
+
+    const width = mkSlider({
+      min: TEXT_WIDTH_MIN, max: 100, title: 'How wide the lines may run',
+      get: () => state.textWidth,
+      set: (v) => { state.textWidth = v; applyLayout(); }
+    });
+    const reader = el('div', 'ytds-tm-reader');
+    reader.append(label('Width'), width.field,
+      el('div', 'ytds-tm-note', 'Background, height and outline appear in Video mode.'));
+
+    const bgSeg = el('div', 'ytds-seg');
+    const setBand = (on) => { state.subBand = on; saveState(); syncUi(); };
+    const bLines = mkBtn('', 'A background behind each line', () => setBand(false), txt('Lines'));
+    const bBand = mkBtn('', 'One band across the picture that stays between sentences — covers subtitles burned into the video',
+      () => setBand(true), txt('Band'));
+    bgSeg.append(bLines, bBand);
+    const opacity = mkSlider({
+      min: 0, max: 100, title: 'How much of the picture the background hides',
+      get: () => state.subOpacity,
+      set: (v) => { state.subOpacity = v; applyLayout(); }
+    });
+    const lift = mkSlider({
+      min: 0, max: SUB_LIFT_MAX, title: 'How high the text sits over the picture',
+      get: liftNow,
+      set: (v) => {
+        const was = state.subLift;
+        state.subLift = v;
+        if (was == null) applyTheme();   // the class that lets the text move
+        applyLift();
+      }
+    });
+    const btnOutline = mkBtn('ytds-pill ytds-pill-text', 'Outline the letters, so the text reads on a bright picture without a background',
+      () => toggleKey('subOutline'), el('span', null, 'Outline'));
+    btnOutline.dataset.key = 'subOutline';
+    const outlineRow = el('div', 'ytds-btn-row');
+    outlineRow.appendChild(btnOutline);
+    const video = el('div', 'ytds-tm-video');
+    video.append(label('Background'), bgSeg, label('Opacity'), opacity.field,
+      label('Height'), lift.field, outlineRow,
+      el('div', 'ytds-tm-note', 'Width appears without video.'));
+
+    const keysNow = () => (state.videoMode ? TEXT_KEYS_VIDEO : TEXT_KEYS_READER);
+    const btnReset = mkBtn('ytds-text-btn', 'Return the text settings shown here to their defaults', () => {
+      for (const k of keysNow()) state[k] = DEFAULTS[k];
+      saveState(); syncUi();
+    }, icon('replay'), txt('Reset text settings'));
+
+    const resetRow = el('div', 'ytds-btn-row');
+    resetRow.appendChild(btnReset);
+    menu.append(label('Size'), mkFontSeg(), label('Font'), fontList, label('Show'), showRow, reader, video, resetRow);
+
+    const sync = () => {
+      for (const b of fontBtns) b.classList.toggle('ytds-on', b.dataset.font === state.textFont);
+      bLines.classList.toggle('ytds-on', !state.subBand);
+      bBand.classList.toggle('ytds-on', !!state.subBand);
+      // Study mode always holds a single sentence, so there is no line before
+      // it to keep: the button says so instead of taking a press that does nothing.
+      btnPrev.disabled = !!state.study;
+      btnPrev.title = state.study
+        ? 'Free reading only: Study mode shows one sentence at a time'
+        : 'Keep the line that just went by on screen, dimmed, above the current one';
+      width.sync(); opacity.sync(); lift.sync();
+      btnReset.disabled = keysNow().every((k) => state[k] === DEFAULTS[k]);
+    };
+    menus.push({ sync });
+
+    const btn = mkBtn('ytds-icon', 'Text', (e) => {
+      e.stopPropagation();
+      const wasOpen = menu.classList.contains('ytds-open');
+      closeMenus();
+      if (wasOpen) return;
+      for (const [code] of FONTS) ensureFont(code);
+      menu.classList.add('ytds-open');
+      sync();   // after opening: the height handle is placed from the layout
+    }, icon('text'));
     wrap.append(btn, menu);
     return wrap;
   }
@@ -4106,6 +4274,9 @@
       + (state.focus ? ' ytds-focus' : '')
       + (state.transcript ? ' ytds-transcript-open' : '')
       + (state.videoMode ? ' ytds-video' : '')
+      + (state.videoMode && state.subBand ? ' ytds-band' : '')
+      + (state.videoMode && state.subOutline ? ' ytds-outline' : '')
+      + (state.videoMode && state.subLift != null ? ' ytds-lifted' : '')
       // The transcript follows the UK chip rather than owning a setting of its
       // own: turn the translation off and the list is the original alone,
       // twice as much of it on screen.
@@ -4186,12 +4357,76 @@
     // .ytds-en/.ytds-ua, both of which live inside it, and writing it to the
     // page left our custom property on YouTube with the overlay long closed.
     if (!panel) return;
-    panel.style.setProperty('--font-scale', state.fontScale || 1);
+    panel.style.setProperty('--font-scale', fontScaleNow());
+    panel.style.setProperty('--text-font', fontStack(state.textFont));
+    panel.style.setProperty('--text-width', String(state.textWidth / 100));
+    panel.style.setProperty('--sub-alpha', String(state.subOpacity / 100));
+    ensureFont(state.textFont);
+    applyLift();
   }
 
-  // The subtitle scale is a 5-step ladder (XS…XL), not a free slider.
+  // A face's CSS stack: the bundled family first, its own kind behind it.
+  function fontStack(code) {
+    const f = FONTS.find((x) => x[0] === code) || FONTS[0];
+    return f[2] ? `"ytds-font-${f[0]}", ${f[3]}` : f[3];
+  }
+
+  // Bundled faces load on first use, once per page: the one chosen, or all of
+  // them when the menu opens, because the menu writes each name in its face.
+  // From disk, never the network. The manifest hands the files to youtube.com
+  // only, under a per-session URL, so no page can probe for the extension.
+  function ensureFont(code) {
+    const f = FONTS.find((x) => x[0] === code);
+    if (!f || !f[2] || fontLoads.has(code)) return;
+    let face;
+    try {
+      face = new FontFace('ytds-font-' + code, `url("${chrome.runtime.getURL(f[2])}") format("woff2")`);
+    } catch (e) {
+      // An orphaned content script (the extension reloaded under the page)
+      // has no runtime to ask; the fallback face is already on screen.
+      fontLoads.set(code, null);
+      dbg(`font ${f[1]}: ${(e && e.message) || e} — the system face stands in`);
+      return;
+    }
+    document.fonts.add(face);
+    fontLoads.set(code, face.load().catch((e) => {
+      dbg(`font ${f[1]} did not load (${(e && e.message) || e}) — the system face stands in`);
+    }));
+  }
+
+  // Where the text sits over video. Null is where it always sat: above the
+  // shadowing row, which comes and goes, so it is no single number. A number
+  // is the bottom edge of the text in percent of the frame's height, counted
+  // from the bottom; in video mode the player fills the window, so the window
+  // is the frame. The text is moved by a transform from where the layout puts
+  // it — which is also how it reaches below the stage, under the controls,
+  // where subtitles burned into a picture usually are.
+  function textBottomGap() {
+    const r = elStage.getBoundingClientRect();
+    const pb = parseFloat(getComputedStyle(elStage).paddingBottom) || 0;
+    return window.innerHeight - (r.bottom - pb);
+  }
+  function applyLift() {
+    if (!panel || !elStage) return;
+    const on = state.reader && state.videoMode && state.subLift != null;
+    const shift = on ? Math.round(textBottomGap() - window.innerHeight * state.subLift / 100) : 0;
+    panel.style.setProperty('--sub-shift', shift + 'px');
+  }
+  // The handle's place while the height is still "where it always sat".
+  function liftNow() {
+    if (state.subLift != null) return state.subLift;
+    if (!state.reader || !elStage || !window.innerHeight) return 0;
+    return clamp(Math.round(textBottomGap() / window.innerHeight * 100), 0, SUB_LIFT_MAX);
+  }
+
+  // Two sizes, one per mode: covering subtitles burned into a video takes a
+  // size the reader has no use for, and the other way round.
+  function fontKey() { return state.videoMode ? 'vidFontScale' : 'fontScale'; }
+  function fontScaleNow() { return state[fontKey()] || 1; }
+
+  // The subtitle scale is a ladder (MIN…XL), not a free slider.
   function fontStepIdx() {
-    const cur = state.fontScale || 1;
+    const cur = fontScaleNow();
     let best = 0;
     for (let i = 1; i < FONT_STEPS.length; i++) {
       if (Math.abs(FONT_STEPS[i][1] - cur) < Math.abs(FONT_STEPS[best][1] - cur)) best = i;
@@ -4200,7 +4435,7 @@
   }
 
   function changeFont(delta) {
-    state.fontScale = FONT_STEPS[clamp(fontStepIdx() + delta, 0, FONT_STEPS.length - 1)][1];
+    state[fontKey()] = FONT_STEPS[clamp(fontStepIdx() + delta, 0, FONT_STEPS.length - 1)][1];
     saveState(); applyLayout(); syncUi();
   }
 

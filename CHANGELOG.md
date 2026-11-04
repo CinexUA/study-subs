@@ -39,12 +39,36 @@ guess at that.
   reading itself: High Contrast (white and yellow on black) and Paper (black
   and grey, like an e-reader). The toolbar popup follows the scheme too.
 
+- **A text menu, and a way to cover subtitles burned into the video.** A new
+  **Aa** button in the reader's top bar, beside the color schemes, opens one
+  menu for how the text looks. Size lives there now, and it is kept
+  separately for the reader and for Video mode, so a large size picked to
+  cover something on the picture no longer makes the reader large. There are
+  five fonts: the one the reader always used, which stays the default, plus
+  Literata, Inter, Andika and JetBrains Mono. These four ship inside the
+  extension, so they look the same on every system and nothing is fetched
+  from the web. Without video, a slider narrows the lines. Over video there
+  are four settings: the background can stay a box behind each line or turn
+  into one band across the picture; its opacity goes from 0 to 100%; a height
+  slider moves the text anywhere from the bottom of the frame to near the
+  top; and an outline around the letters keeps the text readable with no
+  background at all. The band stays in place between sentences and does not
+  grow word by word, so subtitles burned into the video stay hidden under it
+  the whole time. **Reset text settings** puts back what the menu shows for
+  the mode you are in. Until you change something, nothing looks different.
+
 ### Changed
 
 - **Color schemes sit behind one button.** The three circles in the reader's
   top bar are now a single button that shows the current scheme; clicking it
   opens the schemes as a grid of circles, and picking one closes it. The top
   bar no longer grows with every scheme added.
+
+- **Text size, Word by word and Previous line moved into the text menu.**
+  The A · size · A tray is gone from the top bar, and the Text group is gone
+  from the settings drawer; all three are in the Aa menu, with the same steps
+  and the same defaults. Previous line is greyed out while Study is on, where
+  it never did anything: Study always shows one sentence.
 
 ### Fixed
 

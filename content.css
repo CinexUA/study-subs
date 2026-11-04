@@ -480,6 +480,9 @@
   flex: 0 0 auto;
   flex-wrap: nowrap;
 }
+/* The right group is three groups (see buildTop); each after the first opens
+   with twice the gap, so the grouping shows without a divider. */
+.ytds-top-side.ytds-right > .ytds-group-start { margin-left: calc(.8 * var(--u)); }
 /* Lives in the transport now, next to the clock: both answer "where am I". */
 .ytds-counter {
   font: 500 calc(1.05 * var(--u)) / 1 var(--sans);
@@ -647,6 +650,12 @@
 }
 .ytds-zone-en { justify-content: flex-end; }
 .ytds-zone-ua { justify-content: flex-start; }
+/* The reading column, narrowed from the text menu. Over video the text keeps
+   the width of the picture: there it covers what it has to cover. */
+.ytds-panel:not(.ytds-video) .ytds-zone {
+  width: calc(100% * var(--text-width, 1));
+  align-self: center;
+}
 
 /* Free-reading mode stacks two lines per zone: the previous one is dimmed. */
 .ytds-block { opacity: .4; transition: opacity var(--d3) var(--ease-out); }
@@ -657,7 +666,7 @@
   background: linear-gradient(90deg, rgba(0,0,0,0), var(--line), rgba(0,0,0,0));
 }
 .ytds-line {
-  font-family: var(--serif);
+  font-family: var(--text-font, var(--serif));
   font-weight: 400;
   line-height: 1.28;
   text-wrap: balance;
@@ -909,6 +918,9 @@
   --vid-fg: #ffffff;
   --vid-fg-2: #ffd479;
   --vid-scrim: rgba(0,0,0,.58);
+  /* Behind the subtitle lines only: the text menu's Opacity (content.js sets
+     --sub-alpha). The note card keeps --vid-scrim. */
+  --sub-scrim: rgba(0,0,0,var(--sub-alpha, .6));
   --vid-lit: rgba(255,255,255,.26);
 }
 /* Pointing at a phrase, over video. The source line never dims its neighbours
@@ -941,7 +953,7 @@
 .ytds-video .ytds-zone { min-height: 0; }
 .ytds-video .ytds-line {
   color: var(--vid-fg);
-  background-color: var(--vid-scrim);
+  background-color: var(--sub-scrim);
   padding: calc(.3 * var(--u)) calc(1 * var(--u));
   border-radius: var(--r-xs);
   /* Each wrapped row gets the box, instead of one box behind a ragged block. */
@@ -949,6 +961,47 @@
   -webkit-box-decoration-break: clone;
 }
 .ytds-video .ytds-ua { color: var(--vid-fg-2); }
+
+/* Band: one strip across the picture instead of a box per line, there to hide
+   subtitles burned into the video. A box per line grows word by word and is
+   gone between sentences — both times the burned-in text shows. So the two
+   zones paint it, edge to edge of the stage, and keep at least one line of
+   each language tall while there is nothing in them. Nothing to cover until
+   the track is there: an empty stage (no captions) has no band. */
+.ytds-video.ytds-band .ytds-line { background-color: transparent; }
+.ytds-video.ytds-band .ytds-stage:not(.ytds-empty) .ytds-zone {
+  margin-left: calc(-8 * var(--u));
+  margin-right: calc(-8 * var(--u));
+  padding-left: calc(8 * var(--u));
+  padding-right: calc(8 * var(--u));
+  background-color: var(--sub-scrim);
+}
+.ytds-video.ytds-band .ytds-stage:not(.ytds-empty) .ytds-zone-en {
+  padding-top: calc(.8 * var(--u));
+  min-height: calc(4.1 * var(--u) * var(--font-scale, 1) * 1.28 + 1.4 * var(--u));
+}
+.ytds-video.ytds-band .ytds-stage:not(.ytds-empty) .ytds-zone-ua {
+  padding-bottom: calc(.8 * var(--u));
+  min-height: calc(3.2 * var(--u) * var(--font-scale, 1) * 1.28 + 1.4 * var(--u));
+}
+.ytds-video.ytds-band.ytds-no-ua .ytds-stage:not(.ytds-empty) .ytds-zone-ua { min-height: 0; }
+/* Outline: readable on a bright frame with no background at all. In em, so it
+   follows the size. Black like the scrim — it sits on the film, not on paper. */
+.ytds-video.ytds-outline .ytds-line {
+  text-shadow:
+    -.045em -.045em 0 #000, .045em -.045em 0 #000,
+    -.045em .045em 0 #000, .045em .045em 0 #000,
+    0 0 .14em rgba(0,0,0,.75);
+}
+/* Height: the zones move from where the layout puts them; content.js measures
+   the distance (--sub-shift) so the bottom edge lands where the slider says. */
+.ytds-video.ytds-lifted .ytds-zone { transform: translateY(var(--sub-shift, 0px)); }
+/* A transform lifts the zones into the positioned layer, where they would paint
+   over the bars that come after them. Moved text goes UNDER the controls (focus
+   mode shows it whole), and the top bar — with its menus — stays above both. */
+.ytds-video.ytds-lifted .ytds-study-row,
+.ytds-video.ytds-lifted .ytds-controls { position: relative; z-index: 1; }
+.ytds-video.ytds-lifted .ytds-top { position: relative; z-index: 2; }
 
 /* The bar and the transport now float on the film and need their own footing. */
 .ytds-video .ytds-top {
@@ -1177,7 +1230,10 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
 .ytds-menu.ytds-below { top: calc(100% + .6 * var(--u)); bottom: auto; left: auto; right: 0; }
 /* In the top bar a dropdown hangs under its own pill, not off the right edge. */
 .ytds-top .ytds-menu.ytds-below { left: 0; right: auto; }
-.ytds-menu button {
+/* Row buttons are the menu's own children (and the text menu's font list);
+   a control nested deeper — a segment, a pill — keeps its own look. */
+.ytds-menu > button,
+.ytds-menu .ytds-rows > button {
   display: flex;
   width: 100%;
   align-items: center;
@@ -1193,9 +1249,11 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   text-align: left;
   transition: background var(--d1) linear;
 }
-.ytds-menu button:hover { background: var(--bg-hover); }
-.ytds-menu button svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); color: var(--accent); }
-.ytds-menu.ytds-menu-text button { font: 500 calc(1.15 * var(--u)) / 1 var(--sans); }
+.ytds-menu > button:hover,
+.ytds-menu .ytds-rows > button:hover { background: var(--bg-hover); }
+.ytds-menu > button svg,
+.ytds-menu .ytds-rows > button svg { width: calc(1.3 * var(--u)); height: calc(1.3 * var(--u)); color: var(--accent); }
+.ytds-menu.ytds-menu-text > button { font: 500 calc(1.15 * var(--u)) / 1 var(--sans); }
 
 /* ---------- Where to start: the compass menu and the channel entry ----------
    The compass lives in the RIGHT group, so its menu hangs from the button's
@@ -1571,6 +1629,48 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
 }
 .ytds-menu .ytds-swatch:hover { transform: scale(1.12); }
 .ytds-menu .ytds-swatch.ytds-on { box-shadow: 0 0 0 2px var(--bg-elev), 0 0 0 3px var(--accent); }
+
+/* The text menu: a column of small labelled groups. It stays open while you
+   change things, so it must never outgrow the screen — it scrolls first. */
+.ytds-menu.ytds-textmenu {
+  width: calc(24 * var(--u));
+  max-height: calc(100cqh - 7.5 * var(--u));
+  overflow-y: auto;
+  padding: calc(1 * var(--u));
+}
+.ytds-menu.ytds-textmenu.ytds-open { display: flex; flex-direction: column; align-items: flex-start; }
+.ytds-tm-label {
+  margin: calc(.7 * var(--u)) 0 calc(.45 * var(--u));
+  font: 600 calc(.85 * var(--u)) / 1 var(--sans);
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.ytds-textmenu > .ytds-tm-label:first-child { margin-top: calc(.2 * var(--u)); }
+/* The mode's own half starts a new part of the menu: more air above it. */
+.ytds-tm-reader > .ytds-tm-label:first-child,
+.ytds-tm-video > .ytds-tm-label:first-child { margin-top: calc(1.5 * var(--u)); }
+.ytds-textmenu .ytds-rows,
+.ytds-textmenu .ytds-tm-reader,
+.ytds-textmenu .ytds-tm-video { align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; }
+/* Each face's name is written in that face, at a size where they differ. */
+.ytds-textmenu .ytds-rows > button { height: calc(2.3 * var(--u)); font: 400 calc(1.3 * var(--u)) / 1 var(--serif); }
+.ytds-textmenu .ytds-rows > button svg { visibility: hidden; }
+.ytds-textmenu .ytds-rows > button.ytds-on svg { visibility: visible; }
+.ytds-textmenu .ytds-range { width: calc(13 * var(--u)); }
+.ytds-textmenu .ytds-btn-row { margin-top: calc(.7 * var(--u)); }
+.ytds-textmenu .ytds-tm-label + .ytds-btn-row { margin-top: 0; gap: calc(.5 * var(--u)); }
+/* Previous line in Study mode: nothing to keep, so nothing to press. */
+.ytds-textmenu .ytds-pill[disabled] { opacity: .45; cursor: default; }
+.ytds-textmenu .ytds-pill[disabled]:hover { background-color: var(--bg-elev); }
+.ytds-tm-note {
+  margin-top: calc(.6 * var(--u));
+  font: 400 calc(.9 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink-3);
+}
+/* One half of the menu per mode. */
+.ytds-video .ytds-tm-reader,
+.ytds-panel:not(.ytds-video) .ytds-tm-video { display: none; }
 
 /* Sits in Advanced with the status line and the log, in the same monospace and
    the same quiet ink: it is read together with them, and copied with them. */

@@ -31,6 +31,12 @@ for cs in m.get("content_scripts", []):
     out += cs.get("js", []) + cs.get("css", [])
 for p in m.get("web_accessible_resources", []):
     out += p.get("resources", [])
+# A bundled font travels with its licence (the OFL asks for it). The licence is
+# never loaded, so the manifest cannot name it; it is expected next to the font,
+# and a missing one fails the build below like any other missing file.
+for f in list(out):
+    if f.startswith("fonts/") and f.endswith(".woff2"):
+        out.append("fonts/OFL-" + f[len("fonts/"):-len(".woff2")] + ".txt")
 popup = m.get("action", {}).get("default_popup")
 if popup:
     out.append(popup)

@@ -27,11 +27,15 @@ the captions into lines, so one sentence stays one sentence.
 
 ## What else it does
 
-- **Word-by-word reveal**; the previous line stays above, dimmed.
+- **Word-by-word reveal**, in time with the speaker.
 - **Playback speed** 0.5×–2×, and a **scrubber whose notches are sentence
   boundaries** — clicking snaps to the start of a sentence, never into the middle.
 - **Remembers where you stopped** and offers to continue from that sentence.
-- **Translation language, text size (XS…XL) and color scheme** — 24 of them: Sepia, Dark,
+- **Text menu**: size (kept apart for the reader and for Video mode), five
+  fonts, word-by-word reveal on or off, the previous line kept on screen or
+  not, line width; over video, a band that hides subtitles burned into the
+  picture, its opacity and height, and an outline around the letters.
+- **Translation language and color scheme** — 24 of them: Sepia, Dark,
   Light, High Contrast, Paper, and nineteen borrowed from code editors (Darcula, Monokai,
   Dracula, One Dark and One Light, Nord, Gruvbox and Gruvbox Light, Solarized Dark and Light,
   Catppuccin Latte, Tokyo Night, Rosé Pine and Rosé Pine Dawn, Everforest and Everforest Light,
@@ -88,6 +92,9 @@ nothing referenced can be forgotten. Icons are cut from the source artwork with
   `<video>.currentTime`.
 - `content.css` — the overlay's styles; all sizes derive from one
   container-relative unit, so the layout scales with the viewport.
+- `fonts/` — the four bundled subtitle fonts (OFL, licences beside them), cut
+  to Latin and Cyrillic by `tools/make-fonts.py`. The manifest exposes them to
+  `www.youtube.com` only, under a per-session URL.
 
 A diagnostics log lives in the overlay's ⚙ settings → **Advanced**, with a
 **Copy log** button — that is the first place to look if captions don't load.
