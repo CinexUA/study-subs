@@ -763,7 +763,7 @@
       for (let i = 0; i < segs.length; i++) {
         const t = (base + (segs[i].tOffsetMs || 0)) / 1000;
         const nextT = i + 1 < segs.length ? (base + (segs[i + 1].tOffsetMs || 0)) / 1000 : evEnd;
-        units.push({ t, end: nextT != null && nextT > t ? nextT : undefined, text: segs[i].utf8 });
+        units.push({ t, end: nextT != null && nextT > t ? nextT : undefined, text: segs[i].utf8, ev: base });
       }
     }
     return units;
@@ -775,7 +775,7 @@
       const t = parseFloat(n.getAttribute(tAttr) || '0') / scale;
       const d = parseFloat(n.getAttribute(dAttr) || '0') / scale;
       const text = (n.textContent || '').replace(/\s+/g, ' ').trim();
-      return text ? { t, end: d > 0 ? t + d : undefined, text: (i > 0 ? ' ' : '') + text } : null;
+      return text ? { t, end: d > 0 ? t + d : undefined, text: (i > 0 ? ' ' : '') + text, ev: Math.round(t * 1000) } : null;
     }).filter(Boolean);
     let nodes = [...doc.querySelectorAll('text')];
     if (nodes.length) return make(nodes, 'start', 'dur', 1);
@@ -843,7 +843,8 @@
           out.push({
             t: u.t + span * (prev / text.length),
             end: u.t + span * (c / text.length),
-            text: piece
+            text: piece,
+            ev: u.ev
           });
         }
         prev = c;
@@ -1648,39 +1649,163 @@
 
   // Free reading shows lines, not sentences, and a line may start mid-sentence
   // (too long, too slow) or hold two short ones. So the translation is aligned
-  // once, per sentence, and the lines then take their share of it: a line gets
-  // the part of a sentence's translation matching the part of the sentence's own
-  // text it shows. Both partitions are built from the same word array, so the
-  // overlap is counted in words rather than guessed from timestamps.
+  // once, per sentence, and the lines then take their share of it.
+  //
+  // How a sentence's translation is divided between its lines is the part that
+  // was wrong, and it stayed hidden for as long as sentences were short. The
+  // share used to be counted in characters across the WHOLE sentence: a line
+  // showing the middle 30% of the sentence's letters got the middle 30% of the
+  // translation's. Two languages do not spend their letters at the same rate
+  // from one clause to the next, so the cut drifts, and the drift grows with
+  // the sentence. Measured on aVLX0Pg1ZCI (2026-11-11), sentence 7 — 26.7 s,
+  // five lines: "…your mind keeps jumping" stood over "…ваш розум", and
+  // "постійно перестрибує" opened the line below; two lines further down the
+  // cut was already two words out ("лінь, немотивацію," under "reaching for
+  // your phone").
+  //
+  // What the old rule did not use is the one thing the two tracks share
+  // exactly: the caption events. A translated track is the source track's
+  // events with the text swapped — same tStartMs, one for one (1052 of 1058 on
+  // that video) — and YouTube places the translated words event by event:
+  // "try, your mind keeps jumping from one" and "старалися, ваш розум постійно
+  // перестрибує з однієї" are the same event. So an event is a pair of short
+  // texts that are KNOWN to say the same thing, and the character share is
+  // asked only inside it, across seven words instead of seventy. On that
+  // sentence every line then comes out word for word.
+  //
+  // The sentence pairing above this is not touched and still has the last
+  // word: a translated unit never leaves the lines of the sentence it was
+  // aligned to, whatever event it sits in — the event split is YouTube's, and
+  // at a sentence boundary it is exactly the noise alignSentences exists for.
   function spreadToLines(uaSents, enSents, enLines) {
     const lines = enLines.map((l) => ({ start: l.start, end: l.end, units: [] }));
-    let li = 0, lineAt = 0, sentAt = 0;
+    // Which line every source unit is on, in stream order: lines and sentences
+    // are two partitions of the same array.
+    const lineOf = [];
+    enLines.forEach((l, k) => { for (let x = 0; x < l.units.length; x++) lineOf.push(k); });
+    let sentAt = 0, byCaption = 0, whole = 0;
     for (let si = 0; si < enSents.length; si++) {
-      const u = enSents[si].units;
-      // Character offset at every word boundary of this sentence, so a line's
-      // slice of it is two lookups.
-      const cum = new Float64Array(u.length + 1);
-      for (let x = 0; x < u.length; x++) cum[x + 1] = cum[x] + Math.max(1, textLen(u[x].text));
-      const total = cum[u.length] || 1;
-      const sa = sentAt, sb = sentAt + u.length;
-      // Rewind is never needed: lines and sentences both run forward.
-      while (li < lines.length && lineAt + enLines[li].units.length <= sa) {
-        lineAt += enLines[li].units.length; li++;
-      }
-      let k = li, at = lineAt;
-      while (k < lines.length && at < sb) {
-        const la = at, lb = at + enLines[k].units.length;
-        const from = Math.max(la, sa), to = Math.min(lb, sb);
-        if (to > from) {
-          const part = sliceByChars(uaSents[si].units, cum[from - sa] / total, cum[to - sa] / total);
-          if (part.length) lines[k].units = lines[k].units.concat(part);
+      const eu = enSents[si].units, uu = uaSents[si].units;
+      const at = sentAt;
+      sentAt += eu.length;
+      if (!eu.length || !uu.length) continue;
+      const first = lineOf[at], last = lineOf[at + eu.length - 1];
+      if (first === last) { lines[first].units = lines[first].units.concat(uu); continue; }
+      const blocks = captionBlocks(eu, uu);
+      if (blocks) byCaption++; else whole++;
+      // The pointer only moves forward, so the text is never reordered.
+      let k = first;
+      for (const [ea, eb, ua, ub] of blocks || [[0, eu.length, 0, uu.length]]) {
+        // Translation with no source to be placed against: it reads on from
+        // wherever the text has got to.
+        if (ea === eb) { for (let x = ua; x < ub; x++) lines[k].units.push(uu[x]); continue; }
+        let et = 0, ut = 0;
+        for (let x = ea; x < eb; x++) et += unitLen(eu[x]);
+        for (let x = ua; x < ub; x++) ut += unitLen(uu[x]);
+        // A unit goes where its own middle falls — the rule sliceByChars cuts
+        // by, so with one block for the whole sentence this is the old answer.
+        let ex = ea, eacc = 0, acc = 0;
+        for (let x = ua; x < ub; x++) {
+          const mid = (acc + unitLen(uu[x]) / 2) / ut;
+          while (ex + 1 < eb && (eacc + unitLen(eu[ex])) / et <= mid) { eacc += unitLen(eu[ex]); ex++; }
+          k = Math.max(k, lineOf[at + ex]);
+          lines[k].units.push(uu[x]);
+          acc += unitLen(uu[x]);
         }
-        at = lb; k++;
       }
-      sentAt = sb;
     }
     for (const l of lines) l.full = joinUnits(l.units);
+    // Always said, like the cue filter: "split by caption" and "never ran" look
+    // the same on screen. And a track cached before units carried their caption
+    // has no way to say which one it was in, so it takes the old split until it
+    // is fetched again — the log is the only place that can tell you so.
+    if (byCaption + whole) {
+      dbg(`translation split into lines by caption: ${byCaption} of ${byCaption + whole} sentences over several lines`
+        + (whole ? ` · ${whole} by length alone` : '')
+        + (whole > byCaption ? ' — the track was cached by an older version: ⚙ → Advanced → Reload captions' : ''));
+    }
     return lines;
+  }
+
+  const unitLen = (u) => Math.max(1, textLen(u.text));
+
+  // One sentence and its translation, cut into blocks that are known to say the
+  // same thing: [source from, to, translation from, to), in reading order. A
+  // block is a caption event both sides have words in. Two things have no twin:
+  //
+  //   Translation in an event the sentence has no source word in — the head or
+  //     tail of a translated sentence that YouTube put one caption early or
+  //     late. It gets a block with no source side, and the caller lets it read
+  //     on from where the text is.
+  //   Source in an event the translation left EMPTY. Two different things look
+  //     like this. YouTube drops an event and hands its words to a neighbour
+  //     as one lump (6 of 1058 events on aVLX0Pg1ZCI: "you will earn a brain
+  //     that can focus" has no twin, and "again." after it carries "знову
+  //     отримаєте мозок, який зможе зосередитися.") — then the neighbour
+  //     answers for both, and it is usually the later one but not always. Or
+  //     the words were simply never translated ("you would do," came back as
+  //     a bare comma) — then nobody answers for them, and stretching a
+  //     neighbour over them moves its cut for nothing. The lengths tell the
+  //     three apart: the source joins a neighbour only when that neighbour
+  //     holds more translation than its own source accounts for.
+  //
+  // No event on either side (a track cached before events were kept), events
+  // out of order, or not one event in common: null, and the caller cuts the
+  // whole sentence by length, which is what this did before.
+  function captionBlocks(eu, uu) {
+    const runsOf = (units) => {
+      const out = [];
+      for (let i = 0; i < units.length; i++) {
+        const ev = units[i].ev;
+        if (ev == null) return null;
+        const r = out[out.length - 1];
+        if (r && r.ev === ev) { r.b = i + 1; r.len += unitLen(units[i]); continue; }
+        if (r && ev < r.ev) return null;
+        out.push({ ev, a: i, b: i + 1, len: unitLen(units[i]) });
+      }
+      return out;
+    };
+    const er = runsOf(eu), ur = runsOf(uu);
+    if (!er || !ur) return null;
+
+    // Events both sides have. e0/e1 and j are indices into the runs.
+    const pairs = [];
+    for (let i = 0, j = 0; i < er.length && j < ur.length;) {
+      if (er[i].ev === ur[j].ev) { pairs.push({ e0: i, e1: i + 1, j, el: er[i].len, ul: ur[j].len }); i++; j++; }
+      else if (er[i].ev < ur[j].ev) i++;
+      else j++;
+    }
+    if (!pairs.length) return null;
+
+    let el = 0, ul = 0;
+    for (const r of er) el += r.len;
+    for (const r of ur) ul += r.len;
+    const ratio = ul / el;
+    // How far a pair sits from the length its source predicts, with `more`
+    // source added to it.
+    const off = (p, more) => (p ? Math.abs(p.ul - ratio * (p.el + more)) : 0);
+    for (let b = 0; b <= pairs.length; b++) {
+      const p = b > 0 ? pairs[b - 1] : null, q = b < pairs.length ? pairs[b] : null;
+      const g0 = p ? p.e1 : 0, g1 = q ? q.e0 : er.length;
+      let gap = 0;
+      for (let i = g0; i < g1; i++) gap += er[i].len;
+      if (!gap) continue;
+      const none = off(p, 0) + off(q, 0);
+      const back = p ? off(p, gap) + off(q, 0) : Infinity;
+      const fwd = q ? off(p, 0) + off(q, gap) : Infinity;
+      if (back < none && back <= fwd) { p.e1 = g1; p.el += gap; }
+      else if (fwd < none) { q.e0 = g0; q.el += gap; }
+    }
+
+    const out = [];
+    let j = 0;
+    for (const p of pairs) {
+      if (j < p.j) out.push([0, 0, ur[j].a, ur[p.j].a]);
+      out.push([er[p.e0].a, er[p.e1 - 1].b, ur[p.j].a, ur[p.j].b]);
+      j = p.j + 1;
+    }
+    if (j < ur.length) out.push([0, 0, ur[j].a, uu.length]);
+    return out;
   }
 
   // The auto-stop leaves the playhead a hair short of the sentence end (the

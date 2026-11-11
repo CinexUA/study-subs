@@ -14,6 +14,22 @@ One that shipped is listed even if it was fixed the same week — the test is
 whether a stranger's browser ever ran it, and this file is the wrong place to
 guess at that.
 
+## Unreleased
+
+### Fixed
+
+- **With Study off, the translation stays under the line it translates.** A
+  long sentence is shown a line at a time, and each line got its share of the
+  translation by counting letters across the whole sentence. The two languages
+  do not spend their letters at the same pace, so in a long sentence the cut
+  drifted: one line ended on "ваш розум" over "your mind keeps jumping", and a
+  few lines later the translation was two words out ("лінь, немотивацію,"
+  under "reaching for your phone"). The translation is now divided by the
+  subtitle captions both tracks share, so each line gets the words of its own
+  captions. Pointing at a phrase on such a line now lights the right part of
+  the translation. Subtitles already saved on your device keep the old
+  division until you press Reload captions in ⚙ → Advanced.
+
 ## 1.5.0 — 2026-11-04
 
 ### Added
