@@ -1872,6 +1872,28 @@
     video.currentTime = clamp(video.currentTime + d, 0, video.duration);
   }
 
+  // Free reading moves through what is on screen: the arrows go to the line
+  // before or after the one showing. They used to seek 5 s, the player's own
+  // step, and a line runs longer than that all the time — on aVLX0Pg1ZCI 266 of
+  // 470 lines span more than 5 s and the longest 8.2 s (2026-11-11), so → from
+  // 0:22 landed on 0:27 with the same line still up and nothing to show that
+  // the key had worked.
+  //
+  // To the line's own start, with no pre-roll: pickLine decides which line is
+  // showing from `start`, so even 150 ms early is the line BEFORE — and the
+  // next → would then be counted from it and land right back here. The 10 ms
+  // is there so a currentTime that reads back a hair low still counts as in.
+  // Playback is left as it was, like the seek this replaces.
+  function seekLine(d) {
+    if (!video || !enLines.length) return;
+    hideResume();
+    const at = pickLine(enLines, video.currentTime || 0).idx;
+    // Before the first line → is "the first line", and ← has nowhere to go.
+    const to = clamp(at < 0 ? (d > 0 ? 0 : -1) : at + d, -1, enLines.length - 1);
+    if (to < 0 || to === at) return;
+    video.currentTime = enLines[to].start + 0.01;
+  }
+
   // Last line of defence: if playback is on again within a blink of our pause,
   // nobody asked for it — hold the pause. The window is measured from the
   // original request and never extended, so this can fight the player for at
@@ -4329,7 +4351,7 @@
   // ---------- syncing UI to state ----------
   // The same keys mean different things in the two modes: study mode claims
   // Space, R and the arrows, while free reading hands Space and R back to the
-  // player and keeps only the ±5 s seek. One fixed list would therefore be a
+  // player and keeps only the arrows, by line. One fixed list would therefore be a
   // lie half the time, so the hints follow the mode. Same condition the key
   // handler uses — without sentences there is nothing for study mode to claim.
   function renderKeys() {
@@ -4340,7 +4362,7 @@
     const rows = study
       ? [['Space', 'play / pause'], ['R', 'repeat'], ['⇧R', 'repeat aloud'],
          ['←→', 'sentence'], ['M', 'mute'], ['Esc', 'exit']]
-      : [['←→', 'seek 5 s'], ['M', 'mute'], ['Esc', 'exit'], ['Space R', 'player']];
+      : [['←→', 'line'], ['M', 'mute'], ['Esc', 'exit'], ['Space R', 'player']];
     for (const [k, t] of rows) {
       const s = el('span');
       s.append(el('b', null, k), txt(' ' + t));
@@ -4697,14 +4719,17 @@
       return;
     }
     // Study mode owns the transport keys; with it off they belong to the player
-    // — except the arrows, which the player cannot hear under our fullscreen,
-    // so we do its own ±5 s ourselves.
+    // — except the arrows, which the player cannot hear under our fullscreen.
+    // There they step through lines, the free-reading twin of the sentences
+    // study mode steps through (seekLine); ±5 s is only what is left before the
+    // subtitles have arrived.
     const study = state.study && sentences.length;
     const claim = () => { e.preventDefault(); e.stopImmediatePropagation(); };
     if (key === 'ArrowLeft' || key === 'ArrowRight') {
       claim();
       const fwd = key === 'ArrowRight';
       if (study) playSentence(sentIdx + (fwd ? 1 : -1));
+      else if (enLines.length) seekLine(fwd ? 1 : -1);
       else seekBy(fwd ? 5 : -5);
     } else if (e.code === 'Space') {
       if (!study) return;   // free reading: the player's own key, untouched

@@ -44,7 +44,7 @@ the captions into lines, so one sentence stays one sentence.
 - **Subtitles are cached on your device**, so re-watching needs no network request.
 - **Keyboard**: `Space` play/pause/replay, `←`/`→` previous / next sentence,
   `R` repeat, `Esc` exit. With Study off, `Space` and `R` go to the player and
-  `←`/`→` seek ±5 s.
+  `←`/`→` go to the previous / next line.
 
 ## Install
 

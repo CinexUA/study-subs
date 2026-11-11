@@ -16,6 +16,15 @@ guess at that.
 
 ## Unreleased
 
+### Changed
+
+- **With Study off, ← and → go to the previous and next line.** They used to
+  seek five seconds, the player's own step, and a line on screen is often
+  longer than that: the key moved the video and left the same line up, so it
+  looked as if nothing had happened. They now step through lines the way they
+  step through sentences with Study on. Until the subtitles have loaded they
+  still seek five seconds.
+
 ### Fixed
 
 - **With Study off, the translation stays under the line it translates.** A
