@@ -28,7 +28,7 @@ all of it.
 | Your study bookmark: the timestamp of the sentence you stopped at, per video ID — the 200 most recent videos, about 50 bytes each | So the extension can offer to continue where you left off |
 | When YouTube last asked us to slow down, and how many times in a row | So the extension backs off politely, and waits longer each time, instead of retrying into a wall |
 
-Be aware of what the second and third rows mean in practice: the list of video
+Be aware of what the cache and bookmark rows mean in practice: the list of video
 IDs you have watched with the extension open is stored **locally**. It is never
 sent anywhere, but it is on your disk. You can wipe it at any time — see below.
 
@@ -56,7 +56,7 @@ translation stands exactly under the phrase it translates. That translation is
 made **on your computer**: the subtitle text is not sent to us, to Google or to
 anyone else. The language pack it needs is downloaded by Chrome itself, from
 Google, the first time — after you press **Download** on the card that offers
-it — and the extension has no part in that request and learns nothing from it.
+it — and the extension does not make that request and sees nothing of it.
 You can go back to YouTube's translation at any time in ⚙ → **Advanced** →
 **Translation**.
 

@@ -15,9 +15,9 @@
     vidFontScale: 0.52, textFont: 'default', textWidth: 100,
     subBand: false, subOpacity: 60, subLift: 15, subOutline: false,
     // Where the translation comes from: phrases translated on this device
-    // (where the browser can), or YouTube's own track. `txAsked` is the
-    // download card having been answered once.
-    txMode: 'device', txAsked: false };
+    // (where the browser can), or YouTube's own track. `txAsked` lists the
+    // language pairs ('en>uk') whose download was answered with "Not now".
+    txMode: 'device', txAsked: [] };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -249,6 +249,7 @@
   let txGen = 0;            // which startLocal() the callbacks belong to
   let txQueue = null;
   let txPair = '';          // 'en>uk' the translator instance was made for
+  let txDirty = false;      // this build translated something the cache did not have
   let txPhrases = [];       // per sentence: its phrases, from TX.plan
   let txTimes = [];         // per sentence: when each phrase is spoken
   let txWordPhrase = [];    // per sentence: word index → phrase
@@ -727,7 +728,16 @@
 
   // The escape hatch a cache takes away: with one on disk Ctrl+Shift+R no
   // longer reaches the network, so a track that cached badly would stay.
+  // The device may be translating this very video, and its next phrase would
+  // put the whole map back on disk a few seconds after the purge. So the work
+  // stops first and the write in waiting is dropped with it.
+  function dropTxWrite() {
+    stopLocal('the cache is being cleared');
+    clearTimeout(txTimer); txTimer = null; txPending = null;
+  }
+
   async function purgeVideoCache() {
+    dropTxWrite();
     const mine = (k) => k.indexOf(`${CACHE_PREFIX}${currentVideoId}:`) === 0;
     forget([...memCache.keys()].filter(mine));
     await withIndex(async () => {
@@ -795,7 +805,7 @@
   // Every video's tracks and phrases. Settings, resume marks and the throttle
   // deadline live under other keys and are not touched.
   async function purgeAllCache() {
-    clearTimeout(txTimer); txTimer = null; txPending = null;
+    dropTxWrite();
     memCache.clear();
     await withIndex(async () => {
       try {
@@ -2511,7 +2521,7 @@
   // phrase and its translation are a pair because one was made from the other.
   // Nothing above this is changed by it, and stopLocal() puts the old arrays
   // back in one move: the two never mix inside a sentence.
-  let txBackendMemo;
+  let txBackendMemo, txNoApiSaid = false;
   const txBackend = () => (txBackendMemo === undefined
     ? (txBackendMemo = TX ? TX.chromeBackend() : null) : txBackendMemo);
   const txWanted = () => state.txMode !== 'youtube' && !!txBackend();
@@ -2569,12 +2579,13 @@
     if (avail === 'unavailable') return;
     if (avail !== 'available') { offerDownload(src, dst, !!forceCard); return; }
     if (txPair !== `${src}>${dst}`) {
-      try { await be.create(src, dst); txPair = `${src}>${dst}`; }
+      txPair = '';   // until create() has answered, nobody may trust the old one
+      try { await be.create(src, dst); if (live()) txPair = `${src}>${dst}`; }
       catch (e) {
         // The pack is there, but making a translator still wanted a click
         // (measured 2026-11-12: the first create() of a session can refuse).
         dbg('translator could not start without a click: ' + e.message);
-        if (live()) offerDownload(src, dst, true);
+        if (live()) offerDownload(src, dst, !!forceCard, true);
         return;
       }
       if (!live()) return;
@@ -2630,16 +2641,18 @@
 
     let cached = 0;
     for (const ps of txPhrases) for (const p of ps) if (known.has(p.text)) cached++;
+    txDirty = cached < total;
     dbg(`translation: on device, ${total} phrases in ${sentences.length} sentences, ${cached} from cache`
       + ` (planned in ${Math.round(performance.now() - t0)} ms)`);
 
     const q = TX.queue(be, {
       known,
       onSentence: (si, texts) => { if (my === txGen) placeSentence(si, texts, dst, q); },
-      onFail: (e) => { if (my === txGen) stopLocal('the translator failed: ' + (e && e.message)); },
+      // txPair is forgotten too: the instance that threw is not asked again.
+      onFail: (e) => { if (my === txGen) { txPair = ''; stopLocal('the translator failed: ' + (e && e.message)); } },
       onIdle: () => {
         if (my !== txGen) return;
-        keepTx(dst, q.known, true);
+        if (txDirty) keepTx(dst, q.known, true);
         dbg(`translation: on device, all ${sentences.length} sentences ready in ${Math.round((performance.now() - t0) / 1000)} s`);
       },
     });
@@ -2678,7 +2691,7 @@
     // reader is pointing at, and the rest of the video is arriving behind it.
     if (onStage) lastSig = null;
     updateCue(si);
-    keepTx(dst, q.known);
+    if (txDirty) keepTx(dst, q.known);
   }
 
   // Back to YouTube's translation, all of it at once.
@@ -2717,6 +2730,10 @@
   // reader has just opened, or the captions have just arrived under it.
   function maybeLocal() {
     if (!state.reader || !captionsReady || !sentences.length || state.targetLang === srcLang) return;
+    if (!txBackend() && !txNoApiSaid) {
+      txNoApiSaid = true;
+      dbg('translation on device: no built-in translator reachable from here — YouTube\'s translation it is');
+    }
     if (!txWanted() || txLive || txQueue || dlOpen()) return;
     startLocal();
   }
@@ -2726,7 +2743,7 @@
   function setTxMode(mode) {
     if (state.txMode === mode) return;
     state.txMode = mode;
-    if (mode === 'device') state.txAsked = false;
+    if (mode === 'device') state.txAsked = [];
     saveState();
     syncUi();
     if (mode === 'youtube') { hideDownload(); stopLocal('switched in settings'); }
@@ -2738,17 +2755,20 @@
   // The browser will not fetch a pack without a click, so the first time there
   // is something to translate and no pack to do it with, the stage asks — once.
   // "Not now" is remembered; the switch in ⚙ → Advanced is the way back.
-  let elDl = null, elDlNote = null, elDlRow = null;
+  let elDl = null, elDlNote = null, elDlRow = null, elDlGo = null;
   let dlPair = null, dlBusy = false, dlTimer = null;
   const DL_NOTE = 'Each phrase gets its own translation, made on this device. One download.';
+  const DL_NOTE_HAVE = 'Each phrase gets its own translation, made on this device.';
   const dlOpen = () => !!elDl && elDl.style.display !== 'none';
+  const dlAsking = () => dlOpen() && !dlBusy;   // open AND waiting for an answer
 
   function buildDownloadCard() {
     elDlNote = el('div', 'ytds-resume-ago ytds-dl-note', DL_NOTE);
     elDlRow = el('div', 'ytds-resume-row');
+    elDlGo = el('span', null, 'Download');
     elDlRow.append(
-      mkBtn('ytds-sbtn ytds-primary', 'Download the language pack and translate phrase by phrase', runDownload, el('span', null, 'Download')),
-      mkBtn('ytds-sbtn', "Keep YouTube's translation", () => { state.txAsked = true; saveState(); hideDownload(); }, el('span', null, 'Not now'))
+      mkBtn('ytds-sbtn ytds-primary', 'Translate phrase by phrase on this device', runDownload, elDlGo),
+      mkBtn('ytds-sbtn', "Keep YouTube's translation", declineDownload, el('span', null, 'Not now'))
     );
     elDl = el('div', 'ytds-resume ytds-dl');
     elDl.style.display = 'none';
@@ -2758,12 +2778,25 @@
 
   // `force` is a direct request — the settings switch, or a pack that is on
   // the device but would not start without a click — and overrides "Not now".
-  function offerDownload(src, dst, force) {
+  const declined = (src, dst) => Array.isArray(state.txAsked) && state.txAsked.includes(`${src}>${dst}`);
+  function declineDownload() {
+    const p = dlPair;
+    if (p && !declined(p.src, p.dst)) {
+      state.txAsked = (Array.isArray(state.txAsked) ? state.txAsked : []).concat(`${p.src}>${p.dst}`);
+      saveState();
+    }
+    hideDownload();
+  }
+
+  function offerDownload(src, dst, force, have) {
     if (!elDl || !state.reader || dlOpen() || resumeOpen()) return;
-    if (state.txAsked && !force) return;
+    if (!force && declined(src, dst)) return;
     dlPair = { src, dst };
     clearTimeout(dlTimer);
-    elDlNote.textContent = DL_NOTE;
+    // With the pack already on the device there is nothing to download — the
+    // browser only wants a click before it will start the translator.
+    elDlNote.textContent = have ? DL_NOTE_HAVE : DL_NOTE;
+    elDlGo.textContent = have ? 'Turn on' : 'Download';
     elDlRow.style.display = '';
     elDl.style.display = '';
     if (panel) panel.classList.add('ytds-asking');
@@ -2782,8 +2815,10 @@
   async function runDownload() {
     const be = txBackend(), p = dlPair;
     if (!be || !p || dlBusy) return;
-    state.txAsked = true; saveState();
     dlBusy = true;
+    // From here the card is a progress note, not a question: the text behind
+    // it comes back and Esc goes on to the drawer and the reader.
+    if (panel && !resumeOpen()) panel.classList.remove('ytds-asking');
     elDlRow.style.display = 'none';
     elDlNote.textContent = 'Downloading… 0%';
     try {
@@ -2792,7 +2827,9 @@
       dlBusy = false;
       hideDownload();
       dbg('on-device translation: language pack ready');
-      if (!txLive) startLocal();
+      // Through the same gates as everything else: the reader may have been
+      // closed, or the switch moved to YouTube, while the pack was coming.
+      maybeLocal();
     } catch (e) {
       dlBusy = false;
       dbg('on-device translation download failed: ' + (e && e.message));
@@ -4931,7 +4968,7 @@
       // twice as much of it on screen.
       + (state.showUa ? '' : ' ytds-no-ua')
       + (awake ? ' ytds-awake' : '')
-      + (resumeOpen() || dlOpen() ? ' ytds-asking' : '')
+      + (resumeOpen() || dlAsking() ? ' ytds-asking' : '')
       + (drawerIsOpen() ? ' ytds-drawer-open' : '');
   }
 
@@ -5210,7 +5247,7 @@
       e.stopPropagation();
       // Peel the layers one at a time: menu → resume card → drawer → reader.
       if (panel && panel.querySelector('.ytds-menu.ytds-open')) closeMenus();
-      else if (resumeOpen() || dlOpen()) hideResume();
+      else if (resumeOpen() || dlAsking()) hideResume();
       else if (drawerIsOpen()) closeDrawer();
       else exitReader();
       return;
