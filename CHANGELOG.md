@@ -35,6 +35,11 @@ guess at that.
 
 ### Changed
 
+- **On a dubbed video the reader plays the original audio.** YouTube now dubs
+  videos into the viewer's language by itself, and a dub brings subtitles of
+  its own — the dub's speech, not the speaker's. Opening the reader switches
+  the player to the video's own audio track and says so; closing it puts the
+  dub back, unless you picked another track in the meantime.
 - **The cache keeps 300 records instead of 200**, since a video now has a
   third one for its translated phrases; that is still about a hundred videos.
 
@@ -47,6 +52,14 @@ guess at that.
 
 ### Fixed
 
+- **A dubbed video no longer shows the dub's subtitles as the original.** When
+  the player was playing a dub, the subtitles it fetched were the dub's, and
+  the reader could keep them as the video's original, labelled with the
+  original's language — Ukrainian text under an `EN` switch. Translated from
+  there, a line came out as "ві повинні Змініті цю айдентичнист". Subtitles
+  are now labelled with the language they actually are in, and the dub's are
+  never kept as the original. A video saved that way before stays wrong until
+  Reload captions in ⚙ → Advanced.
 - **With Study off, the translation stays under the line it translates.** A
   long sentence is shown a line at a time, and each line got its share of the
   translation by counting letters across the whole sentence. The two languages

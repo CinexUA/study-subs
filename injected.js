@@ -10,17 +10,45 @@
   // own, and without the status that page reads like a short track: measured
   // 2026-09-21, the player's own tlang=uk request came back as 1103 bytes and
   // was kept as if they were captions, while the real track weighs 433 KB.
-  const report = (url, body, status) => window.postMessage({ type: 'YTDS_TT', url, body, status }, '*');
+  // `dub` too: whether the player was playing a dubbed audio track when it
+  // asked. The captions it asks for then are the dub's, not the video's own.
+  const report = (url, body, status, dub) => window.postMessage({ type: 'YTDS_TT', url, body, status, dub }, '*');
   const log = (msg) => window.postMessage({ type: 'YTDS_LOG', msg }, '*');
   const isTT = (u) => typeof u === 'string' && u.indexOf('/api/timedtext') !== -1;
+
+  // ---- the audio track ----
+  // YouTube dubs videos by itself now, and picks the dub for a viewer whose
+  // language it matches. A dubbed track brings captions of its own (the dub's
+  // speech, in the dub's language), and the player shows those. Measured on
+  // AmV6F92GYQY, 2026-11-12: 19 audio tracks; the video's own is the one with
+  // isDefault and not isAutoDubbed, and setAudioTrack() switches both ways.
+  const audioInfo = (t) => { try { return t && t.getLanguageInfo ? t.getLanguageInfo() : null; } catch (_) { return null; } };
+  function audioTracks() {
+    const p = player();
+    if (!p || !p.getAudioTrack || !p.getAvailableAudioTracks || !p.setAudioTrack) return null;
+    const all = p.getAvailableAudioTracks() || [];
+    // Only one candidate is an answer; none or two is not ours to guess.
+    const own = all.filter((t) => { const i = audioInfo(t); return i && i.isDefault && !i.isAutoDubbed; });
+    return { p, all, now: p.getAudioTrack(), orig: own.length === 1 ? own[0] : null };
+  }
+  function playingDub() {
+    try {
+      const a = audioTracks();
+      const now = a && audioInfo(a.now), orig = a && audioInfo(a.orig);
+      return !!(now && orig && now.id !== orig.id);
+    } catch (_) { return false; }
+  }
 
   // ---- intercept fetch ----
   const origFetch = window.fetch;
   window.fetch = function (input, init) {
     const url = typeof input === 'string' ? input : (input && input.url);
+    // Asked when the request leaves, not when it answers: the reader may switch
+    // the audio in between, and the answer is still the dub's.
+    const dub = isTT(url) && playingDub();
     const p = origFetch.apply(this, arguments);
     if (isTT(url)) {
-      p.then((r) => { const status = r.status; r.clone().text().then((b) => report(url, b, status)).catch(() => {}); })
+      p.then((r) => { const status = r.status; r.clone().text().then((b) => report(url, b, status, dub)).catch(() => {}); })
        .catch(() => {});
     }
     return p;
@@ -35,8 +63,9 @@
   const OrigSend = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function () {
     if (isTT(this._ytdsUrl)) {
+      const dub = playingDub();
       this.addEventListener('load', () => {
-        try { report(this._ytdsUrl, this.responseText, this.status); } catch (_) {}
+        try { report(this._ytdsUrl, this.responseText, this.status, dub); } catch (_) {}
       });
     }
     return OrigSend.apply(this, arguments);
@@ -222,6 +251,28 @@
     if (attempt < 8) setTimeout(() => enableCaptions(attempt + 1, token), ok ? 2500 : 1200);
   }
 
+  let audioToken = 0;
+  let dubWas = null;   // { videoId, id, name } of the dub the reader switched away from
+  const videoIdNow = (p) => { try { return (p.getVideoData && p.getVideoData().video_id) || ''; } catch (_) { return ''; } };
+
+  function toOriginal(videoId, attempt, token) {
+    if (token !== audioToken) return;
+    let a = null;
+    try { a = audioTracks(); } catch (_) {}
+    // Not listed yet, or still the previous video's: ask again shortly.
+    if (!a || !a.all.length || !a.now || (videoId && videoIdNow(a.p) !== videoId)) {
+      if (attempt < 20) setTimeout(() => toOriginal(videoId, attempt + 1, token), 500);
+      return;
+    }
+    const now = audioInfo(a.now), orig = audioInfo(a.orig);
+    if (!now || !orig || now.id === orig.id) return;
+    try {
+      if (!a.p.setAudioTrack(a.orig)) return;
+    } catch (e) { log('audio: could not switch to the original — ' + e.message); return; }
+    dubWas = { videoId: videoIdNow(a.p), id: now.id, name: now.name };
+    window.postMessage({ type: 'YTDS_AUDIO', from: now.name, to: orig.name }, '*');
+  }
+
   window.addEventListener('message', (e) => {
     if (e.source !== window || !e.data) return;
 
@@ -306,6 +357,34 @@
       try {
         const p = document.getElementById('movie_player');
         if (p && p.setSize) p.setSize();
+      } catch (_) {}
+      return;
+    }
+
+    // The reader studies the video's own speech, so it opens on the video's own
+    // audio. Asked once per video while the reader is open (the content script
+    // keeps count); the tracks of a freshly arrived video can take a moment to
+    // be listed, hence the few retries.
+    if (e.data.type === 'YTDS_ORIGINAL_AUDIO') {
+      toOriginal(e.data.videoId, 0, ++audioToken);
+      return;
+    }
+
+    // …and leaves the dub on again when it closes, the way it found it. Not if
+    // the viewer has picked a track of their own since: that choice stands.
+    if (e.data.type === 'YTDS_RESTORE_AUDIO') {
+      audioToken++;
+      const was = dubWas;
+      dubWas = null;
+      try {
+        const a = audioTracks();
+        if (!was || !a || videoIdNow(a.p) !== was.videoId) return;
+        const now = audioInfo(a.now), orig = audioInfo(a.orig);
+        if (!now || !orig || now.id !== orig.id) return;
+        const dub = a.all.find((t) => { const i = audioInfo(t); return i && i.id === was.id; });
+        if (dub && a.p.setAudioTrack(dub)) {
+          window.postMessage({ type: 'YTDS_AUDIO', back: true, from: orig.name, to: was.name }, '*');
+        }
       } catch (_) {}
       return;
     }

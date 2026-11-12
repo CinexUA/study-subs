@@ -481,6 +481,11 @@
     } catch (_) { return url; }
   }
 
+  // The language a timedtext url asks for ('' when it does not say).
+  function urlLang(url) {
+    try { return new URL(url, location.origin).searchParams.get('lang') || ''; } catch (_) { return ''; }
+  }
+
   // ---------- back-off ----------
   // HTTP 429 is YouTube's word and not ours to argue with. Measured 2026-09-21:
   // the player's own request was refused at 8:24 and the first one to pass was
@@ -2948,10 +2953,20 @@
   async function buildFromBase(base, body, capTlang) {
     const gen = loadGen;
     let enUnits = [];
+    // The language of the source is the language of the track its text came
+    // from — the url below, or the cache record — and nothing set earlier in
+    // the load may stand in for it. It used to be filled in only when empty,
+    // and it rarely was: loadCaptions names the English track first, and when
+    // that track's own fetch comes back empty, the text arrives through the
+    // player instead — for whatever track the PLAYER chose. On AmV6F92GYQY
+    // (2026-11-12) that was the Ukrainian dub's captions, kept as `en`: the
+    // translator was then handed Ukrainian as English and answered in a
+    // mangled copy of it ("ві повинні Змініті цю айдентичнист").
+    let unitsLang = '';
     // The interception already handed us this body. Fetching the same half
     // megabyte again on every load is what spent our quota — so the network is
     // the fallback here, not the first move.
-    if (!capTlang && body) enUnits = parseUnits(body);
+    if (!capTlang && body) { enUnits = parseUnits(body); unitsLang = urlLang(base); }
     // Then the disk: this is the path a language change takes when only the
     // translation is missing, and the source is already sitting in the cache.
     // Before this, the intercepted body was kept in memory for exactly this
@@ -2960,19 +2975,18 @@
       const hit = await cachedTrack('src');
       if (hit) {
         enUnits = hit.units;
-        if (!srcLang) srcLang = hit.lang || '';
-        dbg(`source: from cache (${enUnits.length} units, lang=${srcLang || '?'})`);
+        unitsLang = hit.lang || '';
+        dbg(`source: from cache (${enUnits.length} units, lang=${unitsLang || '?'})`);
       }
     }
     // And only then the network.
     if (!enUnits.length) {
       try { enUnits = await fetchUnits(base, null); } catch (e) { dbg('EN fetch failed: ' + e.message); }
+      unitsLang = urlLang(base);
     }
     if (!enUnits.length) return false;
 
-    if (!srcLang) {
-      try { srcLang = new URL(base, location.origin).searchParams.get('lang') || ''; } catch (_) {}
-    }
+    if (unitsLang) srcLang = unitsLang;
     // Kept here, while the parse this decision is about is still the last one:
     // the translation below runs its own parse and moves the json3 flag on.
     keepTrack('src', srcLang, enUnits, 'source track');
@@ -3153,11 +3167,28 @@
     }, 25000);
   }
 
-  async function handleCaptured(url, body, status) {
+  // A dub plays the dub's speech, and the reader is for the video's own: it
+  // asks the player for the original audio once per video while it is open.
+  // Not during an ad — the tracks listed then are the spot's — so this runs on
+  // every tick and goes the moment the ad is over.
+  let audioAskedFor = null;
+  function askOriginalAudio() {
+    if (!state.reader || adNow() || !currentVideoId || audioAskedFor === currentVideoId) return;
+    audioAskedFor = currentVideoId;
+    window.postMessage({ type: 'YTDS_ORIGINAL_AUDIO', videoId: currentVideoId }, '*');
+  }
+
+  async function handleCaptured(url, body, status, dub) {
     // Ads carry captions of their own. Taking one here would label the spot's
     // track as this video's — in capturedBase, and from there into the cache
     // under the video's id.
     if (adNow()) { dbg('intercepted timedtext during an ad — ignored'); return; }
+    // Same story for a dub. With an audio track other than the video's own
+    // playing, the player asks for the captions of THAT track — the dub's
+    // speech, in the dub's language — and kept here they would become this
+    // video's original in the cache, under the video's id. The reader puts
+    // the original audio on when it opens; the player asks again then.
+    if (dub) { dbg('intercepted timedtext for a dubbed audio track — not the original, ignored'); return; }
     const base = reuseBase(url);
     const capTlang = (/[?&]tlang=([^&]*)/.exec(url) || [])[1] || '';
     // The player itself was refused. Its body is an error page, not a track,
@@ -3275,11 +3306,14 @@
     if (e.source !== window || !e.data) return;
     if (e.data.type === 'YTDS_LOG') {
       dbg(e.data.msg);
+    } else if (e.data.type === 'YTDS_AUDIO') {
+      dbg(`audio: ${e.data.from} → ${e.data.to}` + (e.data.back ? ' (the dub the reader found, given back)' : ' (a dub was playing; the reader studies the original)'));
+      if (!e.data.back && state.reader) showHint(`Switched to the original audio (${e.data.to}) — the dub is back when you close the reader`, 4500);
     } else if (e.data.type === 'YTDS_TT') {
       const tl = /[?&]tlang=([^&]*)/.exec(e.data.url);
       const pot = /[?&]pot=/.test(e.data.url) ? 'yes' : 'NO';
       dbg(`intercepted timedtext (tlang=${tl ? tl[1] : '-'}, pot=${pot}, HTTP ${e.data.status == null ? '?' : e.data.status}, body=${(e.data.body || '').length} bytes)`);
-      handleCaptured(e.data.url, e.data.body, e.data.status);
+      handleCaptured(e.data.url, e.data.body, e.data.status, !!e.data.dub);
     }
   });
 
@@ -5173,6 +5207,10 @@
       adWaitUntil = performance.now() + 3000;
       dbg('reader opened during an ad — waiting it out');
     }
+    // Before pokePlayer below: the captions the player then asks for must be
+    // the original's, not a dub's.
+    audioAskedFor = null;
+    askOriginalAudio();
     wake();         // never greet an empty screen: focus mode fades in a moment
     applySpeed();   // from here on the speed in the transport row is the law
     armStudy();
@@ -5201,6 +5239,9 @@
     // The rest of the video is not translated behind a closed reader; what is
     // done is on disk, and opening it again carries on from there.
     stopLocal('the reader was closed');
+    // The dub the reader took off, if it took one, goes back on.
+    audioAskedFor = null;
+    window.postMessage({ type: 'YTDS_RESTORE_AUDIO' }, '*');
     // Closing the overlay withdraws the permission that started the enable loop
     // (see the tail of loadCaptions). Left running it would go on poking the
     // player for another twenty seconds after the feature was put away — and
@@ -5434,6 +5475,10 @@
       if (state.reader) applySpeed();
       loadCaptions();
     }
+    // A new video under an open reader, or the end of an ad that held the ask
+    // back. In the same tick as loadCaptions above, so it reaches the player
+    // before anything that load asks of it.
+    askOriginalAudio();
     // After the block above, not before it: the buttons show what we know about
     // THIS video, and loadCaptions resets that knowledge synchronously before
     // its first await. Drawn earlier they would spend a tick answering for the
