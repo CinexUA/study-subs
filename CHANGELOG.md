@@ -26,10 +26,11 @@ guess at that.
   can now translate each phrase by itself, on your computer, with the browser's
   built-in translator, so a phrase and its translation are a pair by
   construction: under a line, when you point at a phrase, and in the
-  transcript. A card offers the one-time download of the language pack. The
-  price is fluency — a phrase translated without the rest of its sentence can
-  lose agreement — and ⚙ → Advanced → Translation switches back to YouTube's.
-  Browsers without a built-in translator keep working exactly as before.
+  transcript. It is off by default — ⚙ → Advanced → Translation → On device
+  turns it on, and a card then offers the one-time download of the language
+  pack. The price is fluency: a phrase translated without the rest of its
+  sentence can lose agreement. YouTube's translation stays the default, and
+  browsers without a built-in translator keep working exactly as before.
 - **⚙ → Advanced shows what the cache holds, with Clear all.** Reload captions
   next to it still clears only the current video.
 

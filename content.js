@@ -17,7 +17,7 @@
     // Where the translation comes from: phrases translated on this device
     // (where the browser can), or YouTube's own track. `txAsked` lists the
     // language pairs ('en>uk') whose download was answered with "Not now".
-    txMode: 'device', txAsked: [] };
+    txMode: 'youtube', txAsked: [] };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],

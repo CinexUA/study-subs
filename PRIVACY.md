@@ -57,8 +57,9 @@ made **on your computer**: the subtitle text is not sent to us, to Google or to
 anyone else. The language pack it needs is downloaded by Chrome itself, from
 Google, the first time — after you press **Download** on the card that offers
 it — and the extension does not make that request and sees nothing of it.
-You can go back to YouTube's translation at any time in ⚙ → **Advanced** →
-**Translation**.
+It is off by default: nothing of this happens until you choose **On device** in
+⚙ → **Advanced** → **Translation**, and choosing **YouTube** there turns it off
+again.
 
 ## Permissions and why each one is needed
 

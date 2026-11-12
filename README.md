@@ -5,11 +5,11 @@ lesson. It opens a full-screen study overlay with two subtitle rows: the origina
 track on a fixed reading line, its translation right below. Both appear word by
 word, in time with the speaker.
 
-The translation is into any of uk, en, pl, de, es, fr, it, ru. In Chrome 138
-and later it is made phrase by phrase on your own computer, by the browser's
+The translation is into any of uk, en, pl, de, es, fr, it, ru. By default it
+is YouTube's own auto-translate of the whole track. In Chrome 138 and later it
+can instead be made phrase by phrase on your own computer, by the browser's
 built-in translator, so each phrase of it stands exactly under the phrase it
-translates; elsewhere, or if you prefer it, it is YouTube's own auto-translate
-of the whole track (⚙ → Advanced → Translation).
+translates (⚙ → Advanced → Translation → On device).
 
 **→ [Install from the Chrome Web Store](https://chromewebstore.google.com/detail/study-subs-%E2%80%94-dual-subtitl/lodajmmoenlnkiplbeigflgnngojkada)** — free, no account, no sign-up.
 
