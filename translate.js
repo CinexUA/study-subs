@@ -41,6 +41,7 @@
     const maxChars = (opts && opts.maxChars) || 75;
     const byEvent = !!(opts && opts.byEvent);
     const out = [];
+    const piece = (a, b) => ({ a, b, text: textOf(words, a, b), line: words[a].line });
     for (const [a, b] of ranges) {
       if (b <= a) continue;
       let cuts = [a];
@@ -57,9 +58,20 @@
         if (cuts[k] - cuts[k - 1] > 1) { k++; continue; }
         cuts.splice(k > 1 ? k - 1 : k, 1);
       }
-      for (let k = 0; k + 1 < cuts.length; k++) {
-        out.push({ a: cuts[k], b: cuts[k + 1], text: textOf(words, cuts[k], cuts[k + 1]), line: words[cuts[k]].line });
-      }
+      for (let k = 0; k + 1 < cuts.length; k++) out.push(piece(cuts[k], cuts[k + 1]));
+    }
+    // A line shows the phrases that START in it, so a phrase running across a
+    // whole line would leave that line with nothing under it. It is cut where
+    // that line begins — and only there: a phrase that merely spills into a
+    // line with a start of its own stays whole, under the line it began on.
+    const starts = new Set(out.map((p) => p.line));
+    for (let i = 1; i < words.length; i++) {
+      const ln = words[i].line;
+      if (ln === words[i - 1].line || starts.has(ln)) continue;
+      const k = out.findIndex((p) => p.a < i && i < p.b);
+      if (k < 0) continue;
+      out.splice(k, 1, piece(out[k].a, i), piece(i, out[k].b));
+      starts.add(ln);
     }
     return out;
   }

@@ -13,7 +13,11 @@
   const DEFAULTS = { showEn: true, showUa: true, targetLang: 'uk', theme: 'sepia', reader: false, speed: 1, study: true, focus: false, transcript: false, videoMode: false, tailMs: 300,
     fontScale: 0.8, reveal: false, prevLine: false,
     vidFontScale: 0.52, textFont: 'default', textWidth: 100,
-    subBand: false, subOpacity: 60, subLift: 15, subOutline: false };
+    subBand: false, subOpacity: 60, subLift: 15, subOutline: false,
+    // Where the translation comes from: phrases translated on this device
+    // (where the browser can), or YouTube's own track. `txAsked` is the
+    // download card having been answered once.
+    txMode: 'device', txAsked: false };
   const LANGS = [
     ['uk', 'Ukrainian'], ['en', 'English'], ['pl', 'Polish'],
     ['de', 'German'], ['es', 'Spanish'], ['fr', 'French'],
@@ -235,6 +239,23 @@
   // of a line is its own answer and the two can never be looked up in one map.
   let lineChunkCache = {};
   let litChunk = null;   // the target currently pointed at, or null
+  // The translation made on the device, phrase by phrase (see translate.js).
+  // While it is live, uaSentences and uaLines hold ITS text and the pairing of
+  // phrases is not solved for but read off: phrase i answers for phrase i.
+  // YouTube's own translation, aligned as it always was, is kept beside it —
+  // it is what the reader falls back to, whole, the moment this one fails.
+  const TX = globalThis.YTDS_TX || null;
+  let txLive = false;
+  let txGen = 0;            // which startLocal() the callbacks belong to
+  let txQueue = null;
+  let txPair = '';          // 'en>uk' the translator instance was made for
+  let txPhrases = [];       // per sentence: its phrases, from TX.plan
+  let txTimes = [];         // per sentence: when each phrase is spoken
+  let txWordPhrase = [];    // per sentence: word index → phrase
+  let txLines = [];         // per line: [[sentence, phrase], …] that start in it
+  let txWordKey = null;     // 'unit:nth word of it' → [sentence, word]
+  let txLineStart = [];     // per line: index of its first unit in the stream
+  let ytSentences = [], ytLines = [], ytCoverEnd = Infinity;
   // Does this track carry a time per WORD, or only per caption line? The
   // word-by-word reveal is only honest on the first kind; see wordLevelTrack().
   let wordLevel = true;
@@ -1702,9 +1723,13 @@
     if (i < 0 || i >= sentences.length) return null;
     if (Object.prototype.hasOwnProperty.call(chunkCache, i)) return chunkCache[i];
     const uaS = uaSentences[i];
-    const pairs = uaS && uaS.units.length
-      ? buildChunkPairs(joinUnits(sentences[i].units), joinUnits(uaS.units))
-      : null;
+    let pairs = null;
+    if (txLive) {
+      // Nothing to solve: the translation was made from these very phrases.
+      if (uaS && uaS.phr && uaS.units.length) pairs = TX.pairsFor(txPhrases[i], txWordPhrase[i].length, uaS.units);
+    } else if (uaS && uaS.units.length) {
+      pairs = buildChunkPairs(joinUnits(sentences[i].units), joinUnits(uaS.units));
+    }
     chunkCache[i] = pairs;
     return pairs;
   }
@@ -1720,9 +1745,9 @@
     if (i < 0 || i >= enLines.length) return null;
     if (Object.prototype.hasOwnProperty.call(lineChunkCache, i)) return lineChunkCache[i];
     const uaL = uaLines[i];
-    const pairs = uaL && uaL.units.length
-      ? buildChunkPairs(enLines[i].full, uaL.full)
-      : null;
+    let pairs = null;
+    if (txLive) pairs = uaL && uaL.phr && uaL.units.length ? txLinePairs(i) : null;
+    else if (uaL && uaL.units.length) pairs = buildChunkPairs(enLines[i].full, uaL.full);
     lineChunkCache[i] = pairs;
     return pairs;
   }
@@ -2477,6 +2502,220 @@
     return out;
   }
 
+  // ---------- translation made on the device ----------
+  //
+  // finishBuild leaves YouTube's translation aligned exactly as before. This
+  // then REPLACES what the stage reads — uaSentences, uaLines — with a
+  // translation made phrase by phrase by the browser's own translator, so a
+  // phrase and its translation are a pair because one was made from the other.
+  // Nothing above this is changed by it, and stopLocal() puts the old arrays
+  // back in one move: the two never mix inside a sentence.
+  let txBackendMemo;
+  const txBackend = () => (txBackendMemo === undefined
+    ? (txBackendMemo = TX ? TX.chromeBackend() : null) : txBackendMemo);
+  const txWanted = () => state.txMode !== 'youtube' && !!txBackend();
+
+  function stopTx() {
+    txGen++;
+    if (txQueue) { txQueue.stop(); txQueue = null; }
+    txLive = false;
+    txPhrases = []; txTimes = []; txWordPhrase = []; txLines = []; txLineStart = []; txWordKey = null;
+  }
+
+  // The words of a run of units as the stage will print them (joinUnits glues
+  // a unit that opens with a closing mark onto the word before it), each with
+  // the unit it came from and its place inside that unit.
+  function unitWords(units) {
+    const toks = joinUnits(units).split(/\s+/).filter(Boolean);
+    const words = [];
+    let out = '';
+    for (let ui = 0; ui < units.length; ui++) {
+      const txt = units[ui].text;
+      if (out && !/\s$/.test(out) && !/^[\s.,!?;:…)\]'"”’»]/.test(txt)) out += ' ';
+      out += txt;
+      const n = out.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).length;
+      let nth = 0;
+      while (words.length < n && words.length < toks.length) words.push({ text: toks[words.length], u: ui, nth: nth++ });
+    }
+    return words;
+  }
+
+  // When each word of a sentence is spoken. A word-level track says so; on a
+  // line-level one a unit is a whole caption, and its words are spread across
+  // it by their letters — the same reading unitsFrac gives the soft reveal.
+  function wordTimes(units, words, hardEnd) {
+    const total = units.map(() => 0), before = [];
+    for (const w of words) { before.push(total[w.u]); total[w.u] += charLen(w.text) || 1; }
+    return words.map((w, i) => {
+      const u = units[w.u];
+      const end = unitRevealEnd(u, units[w.u + 1], hardEnd);
+      return u.t + (end - u.t) * (before[i] / total[w.u]);
+    });
+  }
+
+  async function startLocal(forceCard) {
+    const be = txBackend();
+    if (!be || !sentences.length) return;
+    const my = ++txGen, gen = loadGen;
+    const live = () => my === txGen && gen === loadGen;
+    const src = TX.baseLang(srcLang), dst = TX.baseLang(state.targetLang);
+    if (!src) { dbg('translation on device: source language unknown — staying with YouTube\'s'); return; }
+    if (src === dst) return;
+    let avail = 'unavailable';
+    try { avail = await be.availability(src, dst); } catch (e) { dbg('translator availability failed: ' + e.message); }
+    if (!live()) return;
+    dbg(`translation on device ${src}→${dst}: ${avail}`);
+    if (avail === 'unavailable') return;
+    if (avail !== 'available') { offerDownload(src, dst, !!forceCard); return; }
+    if (txPair !== `${src}>${dst}`) {
+      try { await be.create(src, dst); txPair = `${src}>${dst}`; }
+      catch (e) {
+        // The pack is there, but making a translator still wanted a click
+        // (measured 2026-11-12: the first create() of a session can refuse).
+        dbg('translator could not start without a click: ' + e.message);
+        if (live()) offerDownload(src, dst, true);
+        return;
+      }
+      if (!live()) return;
+    }
+    const known = await cachedTx(dst);
+    if (!live()) return;
+    beginLocal(my, be, dst, known);
+  }
+
+  function beginLocal(my, be, dst, known) {
+    const t0 = performance.now();
+    const lineOfUnit = [];
+    txLineStart = [];
+    enLines.forEach((l, k) => { txLineStart.push(lineOfUnit.length); for (let x = 0; x < l.units.length; x++) lineOfUnit.push(k); });
+    const byEvent = noStopsVideo === currentVideoId;
+    txPhrases = []; txTimes = []; txWordPhrase = []; txWordKey = new Map();
+    txLines = enLines.map(() => []);
+    let at = 0, total = 0;
+    for (let si = 0; si < sentences.length; si++) {
+      const s = sentences[si];
+      const words = unitWords(s.units);
+      words.forEach((w, wi) => {
+        w.ev = s.units[w.u].ev;
+        w.line = lineOfUnit[at + w.u];
+        txWordKey.set(`${at + w.u}:${w.nth}`, [si, wi]);
+      });
+      const ranges = splitIntoChunks(words.map((w) => w.text).join(' ')).map((c) => [c.units[0].i, c.units[c.units.length - 1].i + 1]);
+      const phrases = TX.plan(words, ranges, { maxChars: 75, byEvent });
+      const stop = s.stop != null ? s.stop : s.end;
+      const wt = wordTimes(s.units, words, stop);
+      const ofWord = [];
+      phrases.forEach((p, g) => {
+        for (let i = p.a; i < p.b; i++) ofWord[i] = g;
+        if (p.line != null && txLines[p.line]) txLines[p.line].push([si, g]);
+      });
+      txPhrases.push(phrases);
+      txWordPhrase.push(ofWord);
+      txTimes.push(phrases.map((p, g) => ({
+        t0: g ? wt[p.a] : s.start,
+        t1: g + 1 < phrases.length ? wt[phrases[g + 1].a] : stop,
+      })));
+      total += phrases.length;
+      at += s.units.length;
+    }
+
+    txLive = true;
+    uaSentences = sentences.map((s) => ({ start: s.start, end: s.end, units: [] }));
+    uaLines = enLines.map((l) => ({ start: l.start, end: l.end, units: [], full: '' }));
+    uaCoverEnd = Infinity;
+    chunkCache = {}; lineChunkCache = {}; lastSig = null;
+    listBuilt = false; listIdx = -1;
+    ensureTranscript();
+
+    let cached = 0;
+    for (const ps of txPhrases) for (const p of ps) if (known.has(p.text)) cached++;
+    dbg(`translation: on device, ${total} phrases in ${sentences.length} sentences, ${cached} from cache`
+      + ` (planned in ${Math.round(performance.now() - t0)} ms)`);
+
+    const q = TX.queue(be, {
+      known,
+      onSentence: (si, texts) => { if (my === txGen) placeSentence(si, texts, dst, q); },
+      onFail: (e) => { if (my === txGen) stopLocal('the translator failed: ' + (e && e.message)); },
+      onIdle: () => {
+        if (my !== txGen) return;
+        keepTx(dst, q.known, true);
+        dbg(`translation: on device, all ${sentences.length} sentences ready in ${Math.round((performance.now() - t0) / 1000)} s`);
+      },
+    });
+    txQueue = q;
+    q.load(txPhrases.map((ps) => ps.map((p) => p.text)));
+    q.focus(sentIdx);
+  }
+
+  // A leading space on every word: joinUnits glues a unit that opens with a
+  // quote mark onto its neighbour, and here every unit is a whole word.
+  const txWord = (u, g) => ({ t: 0, text: ' ' + u.text, g });
+
+  function placeSentence(si, texts, dst, q) {
+    const s = sentences[si];
+    const a = TX.assemble(txPhrases[si], texts, txTimes[si]);
+    uaSentences[si] = { start: s.start, end: s.end, units: a.units.map((u) => txWord(u, u.g)), phr: a.phr };
+    delete chunkCache[si];
+    // The lines this sentence has phrases starting in. A line is filled only
+    // when every phrase it shows is in — two short sentences can share one.
+    let onStage = si === sentIdx;
+    for (const k of new Set(txPhrases[si].map((p) => p.line))) {
+      const mine = txLines[k];
+      if (!mine || !mine.every(([sj]) => uaSentences[sj] && uaSentences[sj].phr)) continue;
+      const l = enLines[k], units = [], phr = [];
+      mine.forEach(([sj, g], n) => {
+        for (const u of uaSentences[sj].units) if (u.g === g) units.push({ t: 0, text: u.text, g: n });
+        const p = uaSentences[sj].phr[g];
+        // Its words must all be out before the line is taken off the stage.
+        phr.push({ n: p.n, t0: Math.min(p.t0, l.end), t1: Math.min(p.t1, l.end) });
+      });
+      uaLines[k] = { start: l.start, end: l.end, units, full: joinUnits(units), phr };
+      delete lineChunkCache[k];
+      if (!state.study && k === lastIdx) onStage = true;
+    }
+    // Only what is on the stage is repainted: a repaint drops the phrase the
+    // reader is pointing at, and the rest of the video is arriving behind it.
+    if (onStage) lastSig = null;
+    updateCue(si);
+    keepTx(dst, q.known);
+  }
+
+  // Back to YouTube's translation, all of it at once.
+  function stopLocal(reason) {
+    const was = txLive;
+    stopTx();
+    if (!was) return;
+    uaSentences = ytSentences; uaLines = ytLines; uaCoverEnd = ytCoverEnd;
+    chunkCache = {}; lineChunkCache = {}; lastSig = null;
+    listBuilt = false; listIdx = -1;
+    ensureTranscript();
+    dbg('translation: back to YouTube\'s — ' + reason);
+  }
+
+  // How many translated words are out, or −1 when the translation on stage is
+  // not the device's (or the reader turned the reveal off).
+  function txReveal(x, t) {
+    if (!txLive || !x || !x.phr || !x.units.length || state.reveal === false) return -1;
+    return Math.min(x.units.length, TX.revealByPhrase(x.phr, t + LEAD));
+  }
+
+  // Pointing in free reading. A line shows the phrases that start in it, so a
+  // word that belongs to a phrase begun on the line above has no target here —
+  // its translation is up there, whole.
+  function txLinePairs(k) {
+    const mine = txLines[k] || [];
+    const local = new Map(mine.map(([si, g], n) => [`${si}:${g}`, n]));
+    const enOf = unitWords(enLines[k].units).map((w) => {
+      const at = txWordKey.get(`${txLineStart[k] + w.u}:${w.nth}`);
+      return at ? local.get(`${at[0]}:${txWordPhrase[at[0]][at[1]]}`) : undefined;
+    });
+    return { count: mine.length, enOf, uaOf: uaLines[k].units.map((u) => u.g) };
+  }
+
+  // The download card arrives with the controls for it (Task 5); until then a
+  // pack that is not on the device simply leaves YouTube's translation up.
+  function offerDownload() {}
+
   function finishBuild(enRaw, uaRaw, sameLang, gen) {
     if (gen !== loadGen) { dbg('build finished after a newer load began — dropping it'); return true; }
     // Before the split, so that nothing downstream — sentences, lines, the
@@ -2511,6 +2750,12 @@
     if (byTime) dbg('source has no sentence punctuation — translation placed by time');
     uaSentences = sameLang ? sentences : alignCovered(uaSents, sentences, byTime);
     uaLines = sameLang ? enLines : spreadToLines(uaSentences, sentences, enLines);
+    // What was just built is YouTube's translation, and it is the one to go
+    // back to. A build can run twice inside one load (an interception rebuilds
+    // once more), so whatever the device was translating for the previous one
+    // is stopped here rather than left to write into the new sentences.
+    stopTx();
+    ytSentences = uaSentences; ytLines = uaLines; ytCoverEnd = uaCoverEnd;
     // Both pairings describe the translation that was just replaced. loadCaptions
     // clears them too, but it is not the only way here: an interception can
     // rebuild once more inside the same load, and a pairing kept across that
@@ -2541,6 +2786,7 @@
     if (state.reader && state.study) armStudy();
     offerResume();  // the first moment sentences exist for this video
     hintNoStops();
+    if (!sameLang && txWanted()) startLocal();
     return true;
   }
 
@@ -2647,6 +2893,7 @@
     enLines = []; uaLines = []; srcLang = ''; enUnitLen = uaUnitLen = 0;
     captionsReady = false;
     sentences = []; uaSentences = []; chunkCache = {}; lineChunkCache = {};
+    stopTx(); ytSentences = []; ytLines = [];
     sentIdx = 0; stopAt = null; sentenceDone = false;
     endLoud(true);   // sentence numbers are about to mean something else
     // Without this the notches survive into the next video, and two videos of
@@ -2949,7 +3196,7 @@
       const enS = sentences[sentIdx];
       const uaS = uaSentences[sentIdx];
       const enN = revealCount(enS, t);
-      const uaN = uaRevealCount(enS, uaS, t);
+      let uaN = uaRevealCount(enS, uaS, t);
       // `paused` is in the signature because stopping is what turns the
       // sentence into pointable phrases: without it the frame that stops looks
       // identical to the one before and the gate would eat the repaint.
@@ -2957,13 +3204,17 @@
       // never moves, so without them the gate would eat every repaint and the
       // sentence would sit there fully lit from its first frame.
       const enW = softCount(enS, t);
-      const uaW = softCountUa(enS, uaS, t);
+      let uaW = softCountUa(enS, uaS, t);
+      // On the device's translation the words of a phrase come out while that
+      // phrase is being spoken, not in proportion to the whole sentence.
+      const txN = txReveal(uaS, t);
+      if (txN >= 0) { if (wordLevel) uaN = txN; else uaW = txN; }
       const sig = `S${sentIdx}:${enN}:${uaN}:${enW}:${uaW}:${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
       if (sig === lastSig) return;
       const fresh = sentIdx !== lastIdx;
       lastSig = sig; lastIdx = sentIdx;
       renderStudy(enS, uaS, enN, uaN, fresh, enW, uaW);
-      if (fresh) { updateCounter(); syncTranscript(); }
+      if (fresh) { updateCounter(); syncTranscript(); if (txQueue) txQueue.focus(sentIdx); }
       return;
     }
 
@@ -2973,7 +3224,7 @@
     // The translation is not searched for: it is the bucket that belongs to
     // this EN line, revealed as far as the EN line itself has got.
     const enLen = en.idx >= 0 ? enLines[en.idx].units.length : 0;
-    const ua = revealAligned(uaLines, en.idx, enLen ? en.n / enLen : 0);
+    let ua = revealAligned(uaLines, en.idx, enLen ? en.n / enLen : 0);
     // The soft reveal, and the same two reasons study mode has for putting its
     // counts in the signature: on a line-level track `en.n` never moves inside
     // a line, and the frame that stops looks identical to the one before it —
@@ -2981,7 +3232,9 @@
     const enL = en.idx >= 0 ? enLines[en.idx] : null;
     const frac = lineFrac(enL, t);
     const enW = lineWords(enL, frac);
-    const uaW = lineWords(ua.idx >= 0 ? uaLines[ua.idx] : null, frac);
+    let uaW = lineWords(ua.idx >= 0 ? uaLines[ua.idx] : null, frac);
+    const txN = txReveal(ua.idx >= 0 ? uaLines[ua.idx] : null, t);
+    if (txN >= 0) { if (wordLevel) ua = { idx: ua.idx, n: txN }; else uaW = txN; }
     const sig = `${en.idx}:${en.n}:${enW}|${ua.idx}:${ua.n}:${uaW}|`
       + `${state.showEn ? 1 : 0}${state.showUa ? 1 : 0}${video.paused ? 'P' : ''}`;
     if (sig === lastSig) return;
@@ -2990,7 +3243,10 @@
     renderLines(en, ua, fresh, enW, uaW);
     // Keep the counter (and the sentence the shadowing row would resume from)
     // honest even while we are not driving playback.
-    if (fresh && sentences.length) { sentIdx = findSentenceAt(t); updateCounter(); syncTranscript(); }
+    if (fresh && sentences.length) {
+      sentIdx = findSentenceAt(t); updateCounter(); syncTranscript();
+      if (txQueue) txQueue.focus(sentIdx);
+    }
   }
 
   // How many EN words of a sentence should be visible at time t.
@@ -3769,6 +4025,20 @@
     // The number is here to be compared later: this is the one place in the
     // reader whose cost grows with the length of the video.
     dbg(`transcript: ${sentences.length} sentences listed in ${Math.round(performance.now() - t0)} ms`);
+  }
+
+  // One block's translation, when it arrives after the list was built: the
+  // device translates a sentence at a time, and the list does not wait for it.
+  function updateCue(i) {
+    if (!listBuilt || !elList) return;
+    const cue = elList.children[i];
+    if (!cue) return;
+    const ua = uaSentences[i];
+    const text = ua ? joinUnits(ua.units) : '';
+    let node = cue.querySelector('.ytds-cue-ua');
+    if (!text) { if (node) node.remove(); return; }
+    if (!node) { node = el('div', 'ytds-cue-ua'); cue.appendChild(node); }
+    node.textContent = text;
   }
 
   // Called from exactly where updateCounter() is called — under the frame gate,

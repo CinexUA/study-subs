@@ -21,8 +21,17 @@ test('plan: a comma ends a phrase', () => {
   eq(plan(W('a b, c d'), [[0, 2], [2, 4]]).map((p) => p.text), ['a b,', 'c d']);
 });
 test('plan: a phrase carries the line of its first word', () => {
-  eq(plan(W('a b, c d', null, [0, 0, 0, 1]), [[0, 2], [2, 4]]).map((p) => p.line), [0, 0]);
+  eq(plan(W('a b, c d', null, [0, 0, 0, 0]), [[0, 2], [2, 4]]).map((p) => p.line), [0, 0]);
   eq(plan(W('a b, c d', null, [0, 0, 1, 1]), [[0, 2], [2, 4]]).map((p) => p.line), [0, 1]);
+});
+test('plan: no line is left without a phrase that starts in it', () => {
+  // 'a b, c | d e f.' — the second phrase would cover the whole of line 1.
+  eq(plan(W('a b, c d e f.', null, [0, 0, 0, 1, 1, 1]), [[0, 2], [2, 6]]).map((p) => [p.a, p.b, p.line]),
+    [[0, 2, 0], [2, 3, 0], [3, 6, 1]]);
+});
+test('plan: a phrase that runs into a line with a start of its own stays whole', () => {
+  eq(plan(W('a b, c d, e f.', null, [0, 0, 0, 1, 1, 1]), [[0, 2], [2, 4], [4, 6]]).map((p) => [p.a, p.b]),
+    [[0, 2], [2, 4], [4, 6]]);
 });
 test('plan: a long phrase with no commas is cut at caption events, a lone word joins its neighbour', () => {
   assert.ok(LONG.length > 75);
