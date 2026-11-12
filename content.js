@@ -581,7 +581,9 @@
   // 2026-09-21 — ten videos, under the 10 MB that chrome.storage.local allows
   // without `unlimitedStorage`; with the permission the ceiling is the disk,
   // and a track that was refused once is worth far more than the space.
-  const CACHE_KEEP = 200;
+  // 300 since the phrases translated on the device got a record of their own:
+  // three keys a video instead of two, and still about a hundred videos.
+  const CACHE_KEEP = 300;
   const CACHE_IDX = 'ytdscap-idx';
   const CACHE_PREFIX = `ytdscap:${CACHE_V}:`;
   const memCache = new Map(); // same, for this page's life: instant relanguaging
@@ -634,9 +636,14 @@
     });
   }
 
-  async function cacheTrack(slot, lang, units) {
-    const key = cacheKey(slot);
-    const rec = { lang, units };
+  function cacheTrack(slot, lang, units) {
+    return cacheRecord(cacheKey(slot), { lang, units });
+  }
+
+  // The key is taken by the caller, not here: a record written late (the
+  // phrases below are) must land under the video it was made for, whatever
+  // the page has navigated to since.
+  async function cacheRecord(key, rec) {
     memCache.set(key, rec);
     await withIndex(async () => {
       try {
@@ -711,6 +718,79 @@
       } catch (e) { dbg('cache clear failed: ' + e.message); }
     });
     dbg('captions cache cleared for this video');
+  }
+
+  // ---------- phrases translated on the device ----------
+  //
+  // One record a video and language, next to the two tracks and under the same
+  // index, so the eviction, the quota retry and Reload captions all cover it
+  // without knowing it exists. Keyed by the source phrase's TEXT rather than
+  // its number: a track parsed again numbers its phrases afresh, and their
+  // text is the one thing that stays.
+  const txKey = (lang) => cacheKey('tx:' + lang);
+
+  async function cachedTx(lang) {
+    const key = txKey(lang);
+    let rec = memCache.get(key);
+    if (!rec) {
+      try {
+        const got = await chrome.storage.local.get(key);
+        rec = got && got[key];
+        if (rec && rec.map) { memCache.set(key, rec); touchCache(key); }
+      } catch (_) {}
+    }
+    // Phrases of another source language answer for another track.
+    if (!rec || !rec.map || rec.src !== srcLang) return new Map();
+    return new Map(Object.entries(rec.map));
+  }
+
+  // The map grows a phrase at a time for a minute or so; it goes to disk at
+  // most once every few seconds, and once more when the work is done (`now`).
+  const TX_WRITE_MS = 5000;
+  let txTimer = null, txPending = null;
+  function keepTx(lang, known, now) {
+    txPending = { key: txKey(lang), src: srcLang, known };
+    if (now) { flushTx(); return; }
+    if (!txTimer) txTimer = setTimeout(flushTx, TX_WRITE_MS);
+  }
+  function flushTx() {
+    clearTimeout(txTimer); txTimer = null;
+    const p = txPending; txPending = null;
+    if (!p || !p.known.size) return;
+    cacheRecord(p.key, { src: p.src, map: Object.fromEntries(p.known) });
+  }
+
+  // What the cache holds, for the one line in the drawer that says so.
+  async function cacheUsage() {
+    try {
+      const idx = ((await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [])
+        .filter((k) => k.indexOf(CACHE_PREFIX) === 0);
+      const bytes = idx.length ? await chrome.storage.local.getBytesInUse([...idx, CACHE_IDX]) : 0;
+      const videos = new Set(idx.map((k) => k.slice(CACHE_PREFIX.length).split(':')[0])).size;
+      return { bytes, videos };
+    } catch (e) { dbg('cache usage failed: ' + e.message); return { bytes: 0, videos: 0 }; }
+  }
+
+  // Every video's tracks and phrases. Settings, resume marks and the throttle
+  // deadline live under other keys and are not touched.
+  async function purgeAllCache() {
+    clearTimeout(txTimer); txTimer = null; txPending = null;
+    memCache.clear();
+    await withIndex(async () => {
+      try {
+        const idx = (await chrome.storage.local.get(CACHE_IDX))[CACHE_IDX] || [];
+        // Keys the index has lost track of are swept too, where the browser
+        // can list them (Chrome 130+); elsewhere the index is all we know.
+        let all = idx;
+        if (chrome.storage.local.getKeys) {
+          all = (await chrome.storage.local.getKeys()).filter((k) => k.indexOf('ytdscap:') === 0);
+        }
+        const drop = [...new Set([...idx, ...all])];
+        if (drop.length) await chrome.storage.local.remove(drop);   // same order as writeCache
+        await chrome.storage.local.set({ [CACHE_IDX]: [] });
+        dbg(`captions cache cleared for every video (${drop.length} records)`);
+      } catch (e) { dbg('cache clear failed: ' + e.message); }
+    });
   }
 
   async function translationUnits(base, lang) {
