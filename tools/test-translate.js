@@ -91,6 +91,89 @@ test('revealByPhrase: never less than one word', () => {
   eq(revealByPhrase([{ n: 2, t0: 3, t1: 4 }], 0), 1);
 });
 
+// ---------- the queue ----------
+const { queue, baseLang } = TX;
+// A stand-in translator: upper-cases, and remembers what it was asked.
+function fake(opts) {
+  const calls = [];
+  return {
+    calls,
+    translate: async (t) => {
+      calls.push(t);
+      await null;
+      if (opts && opts.failOn === t) throw new Error('model gone');
+      return t.toUpperCase();
+    },
+  };
+}
+// Ten one-phrase sentences: 's0.' … 's9.'
+const S10 = () => Array.from({ length: 10 }, (_, i) => [`s${i}.`]);
+function run(be, sentences, setup, known) {
+  return new Promise((resolve) => {
+    const order = [], got = {}, fails = [];
+    const q = queue(be, {
+      known,
+      onSentence: (i, texts) => { order.push(i); got[i] = texts; if (setup && setup.onSentence) setup.onSentence(q, order); },
+      onFail: (e) => { fails.push(e.message); setTimeout(() => resolve({ order, got, fails, q }), 20); },
+      onIdle: () => resolve({ order, got, fails, q }),
+    });
+    q.load(sentences);
+    if (setup && setup.after) setup.after(q);
+  });
+}
+
+test('queue: the sentence in focus first, then onward, then the start', async () => {
+  const r = await run(fake(), S10(), { after: (q) => q.focus(6) });
+  eq(r.order, [6, 7, 8, 9, 0, 1, 2, 3, 4, 5]);
+});
+test('queue: seek reprioritises — a focus moved mid-run is served next', async () => {
+  let moved = false;
+  const r = await run(fake(), S10(), { onSentence: (q) => { if (!moved) { moved = true; q.focus(8); } } });
+  eq(r.order.slice(0, 3), [0, 8, 9]);
+  eq(r.order.length, 10);
+});
+test('queue: a phrase already known never reaches the translator', async () => {
+  const be = fake();
+  const r = await run(be, [['a,', 'b.']], null, new Map([['a,', 'а,']]));
+  eq(be.calls, ['b.']);
+  eq(r.got[0], ['а,', 'b.']);   // 'B.' from the stand-in, lowered like any phrase
+});
+test('queue: a sentence wholly known is still delivered', async () => {
+  const be = fake();
+  const r = await run(be, [['a.']], null, new Map([['a.', 'а.']]));
+  eq(be.calls, []);
+  eq(r.order, [0]);
+});
+test('queue: the same phrase in two sentences is translated once', async () => {
+  const be = fake();
+  const r = await run(be, [['yes,', 'x.'], ['yes,', 'y.']]);
+  eq(be.calls.filter((c) => c === 'yes,').length, 1);
+  eq(r.order, [0, 1]);
+});
+test('queue: what it learns is kept in `known`, normalised', async () => {
+  const r = await run({ translate: async () => 'Ось так.' }, [['like this,']]);
+  eq(r.q.known.get('like this,'), 'ось так,');
+});
+test('queue: backend failure — reported once, and nothing is delivered after it', async () => {
+  const r = await run(fake({ failOn: 's2.' }), S10());
+  eq(r.fails, ['model gone']);
+  eq(r.order, [0, 1]);
+});
+test('queue: nothing arrives after stop()', async () => {
+  const order = [];
+  const q = queue(fake(), { onSentence: (i) => { order.push(i); q.stop(); }, onFail: () => {}, onIdle: () => order.push('idle') });
+  q.load(S10());
+  await new Promise((r) => setTimeout(r, 30));
+  eq(order, [0]);
+});
+test('queue: an empty load is idle at once', async () => {
+  const r = await run(fake(), []);
+  eq(r.order, []);
+});
+test('baseLang: the language without its region', () => {
+  eq(baseLang('en-US'), 'en'); eq(baseLang('pt_BR'), 'pt'); eq(baseLang('UK'), 'uk'); eq(baseLang(''), ''); eq(baseLang(null), '');
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

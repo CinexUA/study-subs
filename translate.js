@@ -128,7 +128,92 @@
     return { count: phrases.length, enOf, uaOf: units.map((u) => u.g) };
   }
 
-  const YTDS_TX = { plan, normalize, assemble, revealByPhrase, pairsFor };
+  // 'en-US' → 'en'. The translator is asked about languages, not regions, and
+  // a track's own code may carry either.
+  const baseLang = (code) => String(code == null ? '' : code).trim().toLowerCase().split(/[-_]/)[0];
+
+  // The work list of one build. Sentences are translated one at a time and a
+  // sentence is handed over only when ALL of its phrases are in: half a
+  // sentence on screen is the fragment this whole file exists to get rid of.
+  //
+  // The order is the reader's, not the video's — the sentence being read,
+  // then the ones after it, and only then back to the start — because a
+  // forty-minute video is a minute of work and nobody should wait for
+  // minute one while standing at minute twenty.
+  //
+  //   sentences — [[sourcePhrase, …], …]
+  //   known     — Map sourcePhrase → translation; filled as the work goes, so
+  //               the caller can put it on disk and hand it back next time.
+  function queue(backend, cb) {
+    const known = (cb && cb.known) || new Map();
+    let sents = [], done = [], focusAt = 0, dead = false, running = false;
+
+    const pick = () => {
+      const n = sents.length;
+      for (let k = 0; k < n; k++) { const i = (focusAt + k) % n; if (!done[i]) return i; }
+      return -1;
+    };
+
+    async function work() {
+      if (running) return;
+      running = true;
+      await null;   // lets a focus() that follows load() in the same turn count
+      while (!dead) {
+        const i = pick();
+        if (i < 0) break;
+        const texts = [];
+        for (const src of sents[i]) {
+          if (!known.has(src)) {
+            let raw;
+            try { raw = await backend.translate(src); }
+            catch (e) {
+              running = false;
+              if (!dead) { dead = true; cb.onFail(e); }
+              return;
+            }
+            if (dead) { running = false; return; }
+            known.set(src, normalize(src, raw));
+          }
+          texts.push(known.get(src));
+        }
+        done[i] = true;
+        cb.onSentence(i, texts);
+      }
+      running = false;
+      if (!dead && cb.onIdle) cb.onIdle();
+    }
+
+    return {
+      known,
+      load(sentences) { sents = sentences || []; done = new Array(sents.length).fill(false); work(); },
+      focus(i) { if (i >= 0 && i < sents.length) focusAt = i; },
+      stop() { dead = true; },
+    };
+  }
+
+  // The translator built into Chrome (138+). Null where there is none, and
+  // the caller then leaves everything exactly as it was. One instance for one
+  // pair of languages at a time: a language change makes a new one.
+  function chromeBackend() {
+    if (typeof Translator === 'undefined') return null;
+    let tr = null;
+    const pair = (src, dst) => ({ sourceLanguage: src, targetLanguage: dst });
+    return {
+      availability: (src, dst) => Translator.availability(pair(src, dst)),
+      // Downloading the language pack needs a user gesture; with the pack
+      // already on the device this resolves from anywhere.
+      async create(src, dst, onProgress) {
+        const made = await Translator.create(Object.assign(pair(src, dst), {
+          monitor(m) { m.addEventListener('downloadprogress', (e) => { if (onProgress) onProgress(e.loaded); }); },
+        }));
+        if (tr && tr.destroy) { try { tr.destroy(); } catch (_) {} }
+        tr = made;
+      },
+      translate: (text) => tr.translate(text),
+    };
+  }
+
+  const YTDS_TX = { plan, normalize, assemble, revealByPhrase, pairsFor, queue, chromeBackend, baseLang };
   globalThis.YTDS_TX = YTDS_TX;
   if (typeof module !== 'undefined') module.exports = YTDS_TX;
 })();
