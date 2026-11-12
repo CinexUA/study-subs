@@ -2339,6 +2339,7 @@
   // Any transport move means the same thing as "Stay here": the card never
   // stands between the user and playback.
   function hideResume() {
+    hideDownload();   // the other card on the stage steps aside the same way
     if (!resumeOpen()) return;
     elResume.style.display = 'none';
     if (panel) panel.classList.remove('ytds-asking');
@@ -2712,9 +2713,93 @@
     return { count: mine.length, enOf, uaOf: uaLines[k].units.map((u) => u.g) };
   }
 
-  // The download card arrives with the controls for it (Task 5); until then a
-  // pack that is not on the device simply leaves YouTube's translation up.
-  function offerDownload() {}
+  // Called wherever the device's translation could start but has not: the
+  // reader has just opened, or the captions have just arrived under it.
+  function maybeLocal() {
+    if (!state.reader || !captionsReady || !sentences.length || state.targetLang === srcLang) return;
+    if (!txWanted() || txLive || txQueue || dlOpen()) return;
+    startLocal();
+  }
+
+  // The settings switch. Choosing the device again is also asking to be
+  // offered the download again, whatever was answered before.
+  function setTxMode(mode) {
+    if (state.txMode === mode) return;
+    state.txMode = mode;
+    if (mode === 'device') state.txAsked = false;
+    saveState();
+    syncUi();
+    if (mode === 'youtube') { hideDownload(); stopLocal('switched in settings'); }
+    else if (state.reader && captionsReady && sentences.length && state.targetLang !== srcLang) startLocal(true);
+  }
+
+  // ---------- the one-time offer to download the language pack ----------
+  //
+  // The browser will not fetch a pack without a click, so the first time there
+  // is something to translate and no pack to do it with, the stage asks — once.
+  // "Not now" is remembered; the switch in ⚙ → Advanced is the way back.
+  let elDl = null, elDlNote = null, elDlRow = null;
+  let dlPair = null, dlBusy = false, dlTimer = null;
+  const DL_NOTE = 'Each phrase gets its own translation, made on this device. One download.';
+  const dlOpen = () => !!elDl && elDl.style.display !== 'none';
+
+  function buildDownloadCard() {
+    elDlNote = el('div', 'ytds-resume-ago ytds-dl-note', DL_NOTE);
+    elDlRow = el('div', 'ytds-resume-row');
+    elDlRow.append(
+      mkBtn('ytds-sbtn ytds-primary', 'Download the language pack and translate phrase by phrase', runDownload, el('span', null, 'Download')),
+      mkBtn('ytds-sbtn', "Keep YouTube's translation", () => { state.txAsked = true; saveState(); hideDownload(); }, el('span', null, 'Not now'))
+    );
+    elDl = el('div', 'ytds-resume ytds-dl');
+    elDl.style.display = 'none';
+    elDl.append(el('div', 'ytds-resume-title', 'Exact phrase translation'), elDlNote, elDlRow);
+    return elDl;
+  }
+
+  // `force` is a direct request — the settings switch, or a pack that is on
+  // the device but would not start without a click — and overrides "Not now".
+  function offerDownload(src, dst, force) {
+    if (!elDl || !state.reader || dlOpen() || resumeOpen()) return;
+    if (state.txAsked && !force) return;
+    dlPair = { src, dst };
+    clearTimeout(dlTimer);
+    elDlNote.textContent = DL_NOTE;
+    elDlRow.style.display = '';
+    elDl.style.display = '';
+    if (panel) panel.classList.add('ytds-asking');
+    dbg(`offering the on-device translation download (${src}→${dst})`);
+  }
+
+  // Never mid-download: the card is then the only sign that anything is happening.
+  function hideDownload() {
+    if (!dlOpen() || dlBusy) return;
+    elDl.style.display = 'none';
+    if (panel && !resumeOpen()) panel.classList.remove('ytds-asking');
+  }
+
+  // create() is reached synchronously from the click: the gesture is what the
+  // browser asks for, and an await before it would spend it.
+  async function runDownload() {
+    const be = txBackend(), p = dlPair;
+    if (!be || !p || dlBusy) return;
+    state.txAsked = true; saveState();
+    dlBusy = true;
+    elDlRow.style.display = 'none';
+    elDlNote.textContent = 'Downloading… 0%';
+    try {
+      await be.create(p.src, p.dst, (f) => { elDlNote.textContent = `Downloading… ${Math.round(f * 100)}%`; });
+      txPair = `${p.src}>${p.dst}`;
+      dlBusy = false;
+      hideDownload();
+      dbg('on-device translation: language pack ready');
+      if (!txLive) startLocal();
+    } catch (e) {
+      dlBusy = false;
+      dbg('on-device translation download failed: ' + (e && e.message));
+      elDlNote.textContent = "Download failed — still using YouTube's translation";
+      dlTimer = setTimeout(hideDownload, 4000);
+    }
+  }
 
   function finishBuild(enRaw, uaRaw, sameLang, gen) {
     if (gen !== loadGen) { dbg('build finished after a newer load began — dropping it'); return true; }
@@ -2786,7 +2871,9 @@
     if (state.reader && state.study) armStudy();
     offerResume();  // the first moment sentences exist for this video
     hintNoStops();
-    if (!sameLang && txWanted()) startLocal();
+    // Only under an open reader: translating a video nobody is reading is a
+    // minute of work for every watch page opened. enterReader asks again.
+    if (!sameLang) maybeLocal();
     return true;
   }
 
@@ -3876,7 +3963,7 @@
     for (const ch of channels()) elNoteCard.appendChild(channelEntry(ch, false));
 
     elStage = el('div', 'ytds-stage ytds-empty');
-    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, elNoteCard, buildResumeCard());
+    elStage.append(elZoneEn, el('div', 'ytds-rule'), elZoneUa, elNote, elNoteCard, buildResumeCard(), buildDownloadCard());
 
     // One listener for the whole stage rather than one per phrase: the
     // sentence is rebuilt on every revealed word, and per-span listeners would
@@ -4253,7 +4340,7 @@
 
   // ---------- settings drawer ----------
   function drawerIsOpen() { return !!panel && panel.classList.contains('ytds-drawer-open'); }
-  function openDrawer() { if (panel) panel.classList.add('ytds-drawer-open'); }
+  function openDrawer() { if (panel) { panel.classList.add('ytds-drawer-open'); paintCache(); } }
   function closeDrawer() { if (panel) { panel.classList.remove('ytds-drawer-open'); closeMenus(); } }
 
   // The log is a stack of divs, and textContent runs them together into one
@@ -4411,6 +4498,54 @@
     return btn;
   }
 
+  // Where the translation comes from. On a browser with no translator of its
+  // own the first half is simply not on offer, and says why.
+  let btnTxDevice = null, btnTxYt = null;
+  function buildTranslationRow() {
+    const has = !!txBackend();
+    btnTxDevice = mkBtn('', has ? 'Each phrase translated on this device, so it stands exactly under its source'
+      : 'This browser has no built-in translator', () => setTxMode('device'), txt('On device'));
+    btnTxDevice.disabled = !has;
+    btnTxYt = mkBtn('', "YouTube's own translation of the whole track", () => setTxMode('youtube'), txt('YouTube'));
+    const seg = el('div', 'ytds-seg');
+    seg.append(btnTxDevice, btnTxYt);
+    const row = el('div', 'ytds-set-row');
+    row.append(el('span', 'ytds-set-label', 'Translation'), seg);
+    return row;
+  }
+
+  // What the cache holds and a way to empty it — every video's, where Reload
+  // captions next to it is this video's alone. Counted when the drawer opens.
+  let elCacheInfo = null, cacheTimer = null;
+  function fmtCache(u) {
+    if (!u.bytes || !u.videos) return 'Cache: empty';
+    const mb = u.bytes / 1048576;
+    return `Cache: ${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB · ${u.videos} video${u.videos === 1 ? '' : 's'}`;
+  }
+  async function paintCache() {
+    if (elCacheInfo) elCacheInfo.textContent = fmtCache(await cacheUsage());
+  }
+  function buildCacheRow() {
+    elCacheInfo = el('span', 'ytds-set-label', 'Cache: …');
+    const btn = mkBtn('ytds-text-btn', 'Forget the cached captions and translations for every video', async () => {
+      clearTimeout(cacheTimer);
+      btn.textContent = 'Clearing…';
+      await purgeAllCache();
+      await paintCache();
+      loadCaptions();   // this video's captions come back from the network
+      btn.textContent = 'Cache cleared';
+      btn.classList.add('ytds-ok');
+      cacheTimer = setTimeout(() => {
+        btn.textContent = 'Clear all';
+        btn.classList.remove('ytds-ok');
+        paintCache();
+      }, 1800);
+    }, txt('Clear all'));
+    const row = el('div', 'ytds-set-row');
+    row.append(elCacheInfo, btn);
+    return row;
+  }
+
   // A stand, not a feature. Ads are the one path the author cannot reach —
   // a Premium account never shows one — so without this the whole ad branch
   // would be written blind and every later regression in it would be invisible.
@@ -4501,9 +4636,11 @@
       ...buildPlaybackGroup(),
       group('Advanced', 'console'),
       ...(tag ? [el('div', 'ytds-ver', tag)] : []),
+      buildTranslationRow(),
       elStatus,
       elLog,
-      btnRow
+      btnRow,
+      buildCacheRow()
     );
 
     elKeys = el('div', 'ytds-keys');
@@ -4732,6 +4869,11 @@
     // holds it is how a control fights back at the person setting it.
     if (inpTail && document.activeElement !== inpTail) inpTail.value = String(state.tailMs);
     if (elTailVal) elTailVal.textContent = `${state.tailMs} ms`;
+    if (btnTxDevice) {
+      const dev = txWanted();
+      btnTxDevice.classList.toggle('ytds-on', dev);
+      btnTxYt.classList.toggle('ytds-on', !dev);
+    }
     paintTail();
     // The answer to "did that do anything", where the doing happens. Silent
     // before a track is loaded — there is no honest number to give then.
@@ -4789,7 +4931,7 @@
       // twice as much of it on screen.
       + (state.showUa ? '' : ' ytds-no-ua')
       + (awake ? ' ytds-awake' : '')
-      + (resumeOpen() ? ' ytds-asking' : '')
+      + (resumeOpen() || dlOpen() ? ' ytds-asking' : '')
       + (drawerIsOpen() ? ' ytds-drawer-open' : '');
   }
 
@@ -4995,6 +5137,7 @@
     if (pokePending && !captionsReady && !awaitingCapture) pokePlayer();
     offerResume();  // captions may have been ready long before the overlay
     hintNoStops();
+    maybeLocal();   // …and so may the sentences the device is to translate
     startLoop();
     saveState();    // last: by now nothing it does can keep the overlay shut
   }
@@ -5007,7 +5150,11 @@
     if (markMoved) saveMark();
     // Silence was the standing choice; walking out is not a reason to drop it.
     endLoud(true);
+    dlBusy = false;
     hideResume();
+    // The rest of the video is not translated behind a closed reader; what is
+    // done is on disk, and opening it again carries on from there.
+    stopLocal('the reader was closed');
     // Closing the overlay withdraws the permission that started the enable loop
     // (see the tail of loadCaptions). Left running it would go on poking the
     // player for another twenty seconds after the feature was put away — and
@@ -5063,7 +5210,7 @@
       e.stopPropagation();
       // Peel the layers one at a time: menu → resume card → drawer → reader.
       if (panel && panel.querySelector('.ytds-menu.ytds-open')) closeMenus();
-      else if (resumeOpen()) hideResume();
+      else if (resumeOpen() || dlOpen()) hideResume();
       else if (drawerIsOpen()) closeDrawer();
       else exitReader();
       return;

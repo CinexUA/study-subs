@@ -1052,6 +1052,8 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   font: 400 calc(1.4 * var(--u)) / 1.4 var(--sans);
   color: var(--ink-3);
 }
+/* The download offer is the same card with a sentence of explanation in it. */
+.ytds-dl-note { max-width: calc(30 * var(--u)); }
 .ytds-resume-row {
   display: flex;
   align-items: center;
@@ -1473,6 +1475,22 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
    cut off past the edge. That is exactly how Simulate ad first shipped
    invisible. Anything added here later wraps instead of disappearing. */
 .ytds-btn-row { display: flex; flex-wrap: wrap; gap: calc(.9 * var(--u)); }
+/* A label with its control on one line of the drawer: where the translation
+   comes from, and what the cache holds. */
+.ytds-set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: calc(.9 * var(--u));
+  margin-top: calc(1 * var(--u));
+}
+.ytds-set-label {
+  font: 500 calc(1.05 * var(--u)) / 1.4 var(--sans);
+  color: var(--ink-2);
+}
+.ytds-seg button[disabled] { opacity: .45; cursor: default; }
+.ytds-seg button[disabled]:hover { background: none; color: inherit; }
 .ytds-group-title {
   margin: calc(1.8 * var(--u)) 0 calc(.5 * var(--u));
   display: flex;
