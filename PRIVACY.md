@@ -1,6 +1,6 @@
 # Privacy Policy — Study Subs
 
-**Last updated:** 29 July 2026
+**Last updated:** 12 November 2026
 
 > The canonical version of this policy lives at
 > <https://cinexua.github.io/study-subs/privacy.html> — that is the URL given to the
@@ -23,7 +23,8 @@ all of it.
 | What | Why it is kept |
 |---|---|
 | Your settings: translation language, theme, font size, playback speed, whether the translation line is shown, end-of-sentence pause | So the overlay opens the way you left it |
-| A cache of subtitle text and its word timings for the videos you have opened, keyed by YouTube video ID — the 200 most recently used tracks, about 200 KB each | So re-watching a video needs no network request at all, and so the extension keeps working if YouTube rate-limits you |
+| A cache of subtitle text and its word timings for the videos you have opened, keyed by YouTube video ID — the 300 most recently used records, about 200 KB each | So re-watching a video needs no network request at all, and so the extension keeps working if YouTube rate-limits you |
+| The phrases of those subtitles as translated on your device (see “Translation on your device” below), in the same cache and under the same video IDs | So a video you come back to is not translated a second time |
 | Your study bookmark: the timestamp of the sentence you stopped at, per video ID — the 200 most recent videos, about 50 bytes each | So the extension can offer to continue where you left off |
 | When YouTube last asked us to slow down, and how many times in a row | So the extension backs off politely, and waits longer each time, instead of retrying into a wall |
 
@@ -36,6 +37,8 @@ sent anywhere, but it is on your disk. You can wipe it at any time — see below
 - **All of it:** remove the extension. Chrome deletes its local storage with it.
 - **The subtitle cache for the current video:** open the overlay's ⚙ settings →
   **Advanced** → **Reload captions**.
+- **The subtitle cache for every video:** the same place → **Clear all**. The
+  line next to it says how much the cache holds.
 
 ## Network requests
 
@@ -45,11 +48,23 @@ are watching, and for YouTube's own machine translation of that track. Nothing
 is sent to any other host. There is no server of ours involved — the extension
 has no backend.
 
+## Translation on your device
+
+Where the browser has a translator of its own (Chrome 138 and later), Study Subs
+can translate each phrase of the subtitles with it, so that every phrase of the
+translation stands exactly under the phrase it translates. That translation is
+made **on your computer**: the subtitle text is not sent to us, to Google or to
+anyone else. The language pack it needs is downloaded by Chrome itself, from
+Google, the first time — after you press **Download** on the card that offers
+it — and the extension has no part in that request and learns nothing from it.
+You can go back to YouTube's translation at any time in ⚙ → **Advanced** →
+**Translation**.
+
 ## Permissions and why each one is needed
 
 - **`storage`** — to keep the settings, the subtitle cache and the study
   bookmark listed above on your device. Nothing else uses it.
-- **`unlimitedStorage`** — so the subtitle cache can hold 200 tracks; without
+- **`unlimitedStorage`** — so the subtitle cache can hold 300 records; without
   it Chrome caps an extension's local storage at 10 MB. It grants no access to
   anything, only room.
 - **Host access to `https://www.youtube.com/*`** — to read the subtitles of the

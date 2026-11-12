@@ -5,8 +5,11 @@ lesson. It opens a full-screen study overlay with two subtitle rows: the origina
 track on a fixed reading line, its translation right below. Both appear word by
 word, in time with the speaker.
 
-Translation goes through YouTube's own auto-translate, into any of uk, en, pl,
-de, es, fr, it, ru.
+The translation is into any of uk, en, pl, de, es, fr, it, ru. In Chrome 138
+and later it is made phrase by phrase on your own computer, by the browser's
+built-in translator, so each phrase of it stands exactly under the phrase it
+translates; elsewhere, or if you prefer it, it is YouTube's own auto-translate
+of the whole track (⚙ → Advanced → Translation).
 
 **→ [Install from the Chrome Web Store](https://chromewebstore.google.com/detail/study-subs-%E2%80%94-dual-subtitl/lodajmmoenlnkiplbeigflgnngojkada)** — free, no account, no sign-up.
 
@@ -85,6 +88,9 @@ nothing referenced can be forgotten. Icons are cut from the source artwork with
 
 - `manifest.json` — Manifest V3, two content scripts on `www.youtube.com`,
   permissions `storage`, `unlimitedStorage` and that one host.
+- `translate.js` — the phrase-by-phrase translation: cutting a sentence into
+  phrases, the work queue, the browser's translator. Free of the page, so
+  `node tools/test-translate.js` checks all of it but the translator itself.
 - `injected.js` — page world (`world: MAIN`): watches the player's own requests
   for the subtitle track and reads `getPlayerResponse()`.
 - `content.js` — isolated world: adds the two entry points, builds the overlay,
@@ -101,7 +107,9 @@ A diagnostics log lives in the overlay's ⚙ settings → **Advanced**, with a
 
 ## Limitations
 
-- Translation is YouTube's own auto-translate. It is readable, not literary.
+- Translation is machine translation either way. On the device it is exact
+  phrase for phrase and less fluent for it; YouTube's reads more smoothly and
+  sits a fragment off about one phrase in five.
 - The video must have YouTube subtitles. If the text is burned into the picture,
   there is nothing to read.
 - Subtitle delivery on YouTube is undocumented and can change without notice; if

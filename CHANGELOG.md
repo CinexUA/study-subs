@@ -16,7 +16,27 @@ guess at that.
 
 ## Unreleased
 
+### Added
+
+- **A translation where every phrase stands under the phrase it translates.**
+  Until now the translation was YouTube's own, made for the whole track and
+  fitted to the original afterwards by length and timing — close, but about one
+  phrase in five sat a fragment off, and pointing at "foggy, lazy, unmotivated"
+  could light "якщо ви відчуваєте втому". In Chrome 138 and later the extension
+  can now translate each phrase by itself, on your computer, with the browser's
+  built-in translator, so a phrase and its translation are a pair by
+  construction: under a line, when you point at a phrase, and in the
+  transcript. A card offers the one-time download of the language pack. The
+  price is fluency — a phrase translated without the rest of its sentence can
+  lose agreement — and ⚙ → Advanced → Translation switches back to YouTube's.
+  Browsers without a built-in translator keep working exactly as before.
+- **⚙ → Advanced shows what the cache holds, with Clear all.** Reload captions
+  next to it still clears only the current video.
+
 ### Changed
+
+- **The cache keeps 300 records instead of 200**, since a video now has a
+  third one for its translated phrases; that is still about a hundred videos.
 
 - **With Study off, ← and → go to the previous and next line.** They used to
   seek five seconds, the player's own step, and a line on screen is often

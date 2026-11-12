@@ -77,10 +77,16 @@ extension deletes all of it.</p>
   </tr>
   <tr>
     <td>A cache of subtitle text and its word timings for videos you have opened,
-    keyed by YouTube video ID — the 200 most recently used tracks, about 200 KB
+    keyed by YouTube video ID — the 300 most recently used records, about 200 KB
     each</td>
     <td>So re-watching needs no network request at all, and the extension keeps
     working if YouTube rate-limits you</td>
+  </tr>
+  <tr>
+    <td>The phrases of those subtitles as translated on your device (see
+    “Translation on your device” below), in the same cache and under the same
+    video IDs</td>
+    <td>So a video you come back to is not translated a second time</td>
   </tr>
   <tr>
     <td>Your study bookmark: the timestamp of the sentence you stopped at, per
@@ -106,6 +112,8 @@ can wipe it at any time — see below.</p>
   storage along with it.</li>
   <li><strong>The subtitle cache for the current video:</strong> in the overlay,
   open ⚙ → <strong>Advanced</strong> → <strong>Reload captions</strong>.</li>
+  <li><strong>The subtitle cache for every video:</strong> the same place →
+  <strong>Clear all</strong>. The line next to it says how much the cache holds.</li>
 </ul>
 
 <h2>Network requests</h2>
@@ -115,11 +123,22 @@ you are watching, and for YouTube's own machine translation of that track. Nothi
 is sent to any other host. There is no server of mine involved — the extension has
 no backend.</p>
 
+<h2>Translation on your device</h2>
+<p>Where the browser has a translator of its own (Chrome 138 and later), Study Subs
+can translate each phrase of the subtitles with it, so that every phrase of the
+translation stands exactly under the phrase it translates. That translation is made
+<strong>on your computer</strong>: the subtitle text is not sent to me, to Google or
+to anyone else. The language pack it needs is downloaded by Chrome itself, from
+Google, the first time — after you press <strong>Download</strong> on the card that
+offers it — and the extension has no part in that request and learns nothing from
+it. You can go back to YouTube's translation at any time in ⚙ →
+<strong>Advanced</strong> → <strong>Translation</strong>.</p>
+
 <h2>Permissions, and why each one is needed</h2>
 <ul>
   <li><code>storage</code> — to keep the settings, the subtitle cache and the study
   bookmark listed above on your device. Nothing else uses it.</li>
-  <li><code>unlimitedStorage</code> — so the subtitle cache can hold 200 tracks;
+  <li><code>unlimitedStorage</code> — so the subtitle cache can hold 300 records;
   without it Chrome caps an extension's local storage at 10 MB. It grants no
   access to anything, only room.</li>
   <li>Host access to <code>https://www.youtube.com/*</code> — to read the subtitles
