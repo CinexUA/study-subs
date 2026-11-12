@@ -4548,7 +4548,16 @@
     seg.append(btnTxDevice, btnTxYt);
     const row = el('div', 'ytds-set-row');
     row.append(el('span', 'ytds-set-label', 'Translation'), seg);
-    return row;
+    // What the choice is between, in the place where it is made: the two
+    // labels alone say where the text comes from and not what that changes.
+    const note = el('div', 'ytds-set-note');
+    note.append(
+      el('div', null, 'On device — each phrase is translated on your computer and stands exactly under the phrase it translates. Reads less smoothly.'),
+      el('div', null, "YouTube — YouTube's translation of the whole video. Reads more smoothly, but a phrase can sit a few words off.")
+    );
+    const box = el('div', 'ytds-set-box');
+    box.append(row, note);
+    return box;
   }
 
   // What the cache holds and a way to empty it — every video's, where Reload

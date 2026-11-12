@@ -1489,6 +1489,17 @@ html.ytds-vmode #movie_player .ytp-gradient-bottom { display: none !important; }
   font: 500 calc(1.05 * var(--u)) / 1.4 var(--sans);
   color: var(--ink-2);
 }
+/* The button's own top margin is for standing in a column; in a row it would
+   push the button below the label it belongs to. */
+.ytds-set-row .ytds-text-btn { margin-top: 0; align-self: center; }
+.ytds-set-note {
+  margin-top: calc(.7 * var(--u));
+  display: flex;
+  flex-direction: column;
+  gap: calc(.35 * var(--u));
+  font: 400 calc(.95 * var(--u)) / 1.45 var(--sans);
+  color: var(--ink-2);
+}
 .ytds-seg button[disabled] { opacity: .45; cursor: default; }
 .ytds-seg button[disabled]:hover { background: none; color: inherit; }
 .ytds-group-title {
