@@ -16,6 +16,7 @@ command -v zip >/dev/null || { echo "zip is not installed" >&2; exit 1; }
 node --check content.js
 node --check injected.js
 node --check channels.js
+node --check translate.js
 node --check popup.js
 echo "node --check ok"
 

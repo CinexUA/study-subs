@@ -25,7 +25,7 @@
     },
     {
       "matches": ["https://www.youtube.com/*"],
-      "js": ["channels.js", "content.js"],
+      "js": ["channels.js", "translate.js", "content.js"],
       "css": ["content.css"],
       "run_at": "document_idle",
       "world": "ISOLATED"
